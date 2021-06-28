@@ -61,6 +61,7 @@
 #include "QtCore/qxmlstream.h"
 #include "qsvgstyle_p.h"
 #include "qsvgfont_p.h"
+#include <functional>
 
 QT_BEGIN_NAMESPACE
 
@@ -68,16 +69,33 @@ class QPainter;
 class QByteArray;
 class QSvgFont;
 
+class Q_SVG_PRIVATE_EXPORT QSvgProp
+{
+public:
+    QSvgProp() = default;
+    virtual ~QSvgProp() = default;
+};
+
 class Q_SVG_PRIVATE_EXPORT QSvgTinyDocument : public QSvgStructureNode
 {
 public:
-    static QSvgTinyDocument * load(const QString &file);
-    static QSvgTinyDocument * load(const QByteArray &contents);
-    static QSvgTinyDocument * load(QXmlStreamReader *contents);
+    static QSvgTinyDocument *load(const QString &file, std::function<QPixmap(const QImage& img)> convertFunc);
+    static QSvgTinyDocument *load(const QByteArray &contents, std::function<QPixmap(const QImage& img)> convertFunc);
+    static QSvgTinyDocument *load(QXmlStreamReader *contents, std::function<QPixmap(const QImage& img)> convertFunc);
+    static QSvgTinyDocument *load(const QString &file,
+                                  const QMap<QString, QMap<QString, QVariant>> &classProperties,
+                                  std::function<QPixmap(const QImage &img)> convertFunc);
+
 public:
-    QSvgTinyDocument();
+    QSvgTinyDocument(QSvgNode *parent = nullptr);
+    QSvgTinyDocument(const QSvgTinyDocument &other);
     ~QSvgTinyDocument();
     Type type() const override;
+
+    virtual QSvgNode *clone(QSvgNode *parent) override;
+
+    void setCoord(const QPointF &coord);
+    const QPointF &coord() const;
 
     QSize size() const;
     void setWidth(int len, bool percent);
@@ -89,19 +107,19 @@ public:
 
     bool preserveAspectRatio() const;
 
+    bool viewBoxValid() const;
     QRectF viewBox() const;
     void setViewBox(const QRectF &rect);
 
-    void draw(QPainter *p, QSvgExtraStates &) override; //from the QSvgNode
+    void draw(QPainter *p, QSvgExtraStates &) override; // from the QSvgNode
 
     void draw(QPainter *p);
-    void draw(QPainter *p, const QRectF &bounds);
-    void draw(QPainter *p, const QString &id,
-              const QRectF &bounds=QRectF());
+    void draw(QPainter *p, const QRectF &bounds, const QRectF &source);
+    void draw(QPainter *p, const QString &id, const QRectF &bounds = QRectF());
 
     QMatrix matrixForElement(const QString &id) const;
     QRectF boundsOnElement(const QString &id) const;
-    bool   elementExists(const QString &id) const;
+    bool elementExists(const QString &id) const;
 
     void addSvgFont(QSvgFont *);
     QSvgFont *svgFont(const QString &family) const;
@@ -109,6 +127,9 @@ public:
     QSvgNode *namedNode(const QString &id) const;
     void addNamedStyle(const QString &id, QSvgFillStyleProperty *style);
     QSvgFillStyleProperty *namedStyle(const QString &id) const;
+
+    const QHash<QString, QSvgRefCounter<QSvgFont>> &namedFonts() const;
+    const QHash<QString, QSvgRefCounter<QSvgFillStyleProperty>> &namedStyles() const;
 
     void restartAnimation();
     int currentElapsed() const;
@@ -118,34 +139,60 @@ public:
     int currentFrame() const;
     void setCurrentFrame(int);
     void setFramesPerSecond(int num);
+
+    void appendXmlClass(const QStringList &xmlClasses);
+    QStringList xmlClassList();
+
+    void setSvgProp(const QSharedPointer<QSvgProp> &svgProp);
+    QSvgProp *getSvgProp();
+
 private:
-    void mapSourceToTarget(QPainter *p, const QRectF &targetRect, const QRectF &sourceRect = QRectF());
+    void mapSourceToTarget(QPainter *p, const QRectF &targetRect,
+                           const QRectF &sourceRect = QRectF());
+
 private:
-    QSize  m_size;
-    bool   m_widthPercent;
-    bool   m_heightPercent;
+    QPointF m_coord;
+    QSize m_size;
+    bool m_widthPercent;
+    bool m_heightPercent;
+    bool m_firstRender;
+    bool m_animated;
 
     mutable QRectF m_viewBox;
 
-    QHash<QString, QSvgRefCounter<QSvgFont> > m_fonts;
+    QHash<QString, QSvgRefCounter<QSvgFont>> m_fonts;
     QHash<QString, QSvgNode *> m_namedNodes;
-    QHash<QString, QSvgRefCounter<QSvgFillStyleProperty> > m_namedStyles;
+    QHash<QString, QSvgRefCounter<QSvgFillStyleProperty>> m_namedStyles;
 
+    QStringList m_xmlClassList;
     QTime m_time;
-    bool  m_animated;
-    int   m_animationDuration;
-    int   m_fps;
+    int m_animationDuration;
+    int m_fps;
 
     QSvgExtraStates m_states;
+    QSharedPointer<QSvgProp> m_svgProp;
 };
+
+inline void QSvgTinyDocument::setCoord(const QPointF &coord)
+{
+    m_coord = coord;
+}
+
+inline const QPointF &QSvgTinyDocument::coord() const
+{
+    return m_coord;
+}
 
 inline QSize QSvgTinyDocument::size() const
 {
     if (m_size.isEmpty())
         return viewBox().size().toSize();
     if (m_widthPercent || m_heightPercent) {
-        const int width = m_widthPercent ? qRound(0.01 * m_size.width() * viewBox().size().width()) : m_size.width();
-        const int height = m_heightPercent ? qRound(0.01 * m_size.height() * viewBox().size().height()) : m_size.height();
+        const int width = m_widthPercent ? qRound(0.01 * m_size.width() * viewBox().size().width())
+                                         : m_size.width();
+        const int height = m_heightPercent
+                ? qRound(0.01 * m_size.height() * viewBox().size().height())
+                : m_size.height();
         return QSize(width, height);
     }
     return m_size;
@@ -171,6 +218,11 @@ inline bool QSvgTinyDocument::heightPercent() const
     return m_heightPercent;
 }
 
+inline bool QSvgTinyDocument::viewBoxValid() const
+{
+    return m_viewBox.isValid();
+}
+
 inline QRectF QSvgTinyDocument::viewBox() const
 {
     if (m_viewBox.isNull())
@@ -186,12 +238,34 @@ inline bool QSvgTinyDocument::preserveAspectRatio() const
 
 inline int QSvgTinyDocument::currentElapsed() const
 {
-    return m_time.elapsed();
+    // set -1 because animation could from 0
+    return m_animated ? m_time.elapsed() : -1;
 }
 
 inline int QSvgTinyDocument::animationDuration() const
 {
     return m_animationDuration;
+}
+
+inline const QHash<QString, QSvgRefCounter<QSvgFont>> &QSvgTinyDocument::namedFonts() const
+{
+    return m_fonts;
+}
+
+inline const QHash<QString, QSvgRefCounter<QSvgFillStyleProperty>> &
+QSvgTinyDocument::namedStyles() const
+{
+    return m_namedStyles;
+}
+
+inline void QSvgTinyDocument::setSvgProp(const QSharedPointer<QSvgProp> &svgProp)
+{
+    m_svgProp = svgProp;
+}
+
+inline QSvgProp *QSvgTinyDocument::getSvgProp()
+{
+    return m_svgProp.get();
 }
 
 QT_END_NAMESPACE

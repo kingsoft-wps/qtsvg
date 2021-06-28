@@ -53,15 +53,27 @@
 
 QT_BEGIN_NAMESPACE
 
+static inline int pmKey(const QSize &size, QIcon::Mode mode, QIcon::State state)
+{
+    return ((((((size.width()<<11)|size.height())<<11)|mode)<<4)|state);
+} 
+
 class QSvgIconEnginePrivate : public QSharedData
 {
 public:
     QSvgIconEnginePrivate()
         : svgBuffers(0), addedPixmaps(0)
+        , isMultiSize(false), isCacheBuf(true)
+        , ratioMode(Qt::KeepAspectRatio)
+        , svgClassMap(0)
         { stepSerialNum(); }
 
     ~QSvgIconEnginePrivate()
-        { delete addedPixmaps; delete svgBuffers; }
+        {
+            delete addedPixmaps;
+            delete svgBuffers;
+            delete svgClassMap;
+        }
 
     static int hashKey(QIcon::Mode mode, QIcon::State state)
         { return (((mode)<<4)|state); }
@@ -71,16 +83,36 @@ public:
                  + QString::number(serialNum, 16).append(QLatin1Char('_'))
                  + QString::number((((((qint64(size.width()) << 11) | size.height()) << 11) | mode) << 4) | state, 16); }
 
+    int uniqueKey(const QSize &size, QIcon::Mode mode, QIcon::State state) const
+        { 
+            if (isMultiSize)
+                return pmKey(size, mode, state);
+            return hashKey(mode, state); }
+
     void stepSerialNum()
         { serialNum = lastSerialNum.fetchAndAddRelaxed(1); }
 
-    bool tryLoad(QSvgRenderer *renderer, QIcon::Mode mode, QIcon::State state);
-    QIcon::Mode loadDataForModeAndState(QSvgRenderer *renderer, QIcon::Mode mode, QIcon::State state);
+    bool tryLoad(QSvgRenderer *renderer, QSize size, QIcon::Mode mode, QIcon::State state, bool bTryMatchSize);
+    QIcon::Mode loadDataForModeAndState(QSvgRenderer *renderer, QSize size, QIcon::Mode mode, QIcon::State state);
+
+    QPair<QString, bool> tryMatch(const QSize &size, QIcon::Mode mode, QIcon::State state);
+    void addSvgClass(QIcon::Mode mode, QIcon::State state, const QStringList &svgClass);
 
     QHash<int, QString> svgFiles;
+    QHash<int, int> svgFilesMode;
     QHash<int, QByteArray> *svgBuffers;
     QHash<int, QPixmap> *addedPixmaps;
+    QMap<int, QString> integerMap;
+    QMap<float, QString> nonIntegerMap;
+    QMap<int, QStringList> *svgClassMap;
     int serialNum;
+    bool isMultiSize;
+    bool isCacheBuf;
+    Qt::AspectRatioMode ratioMode;
+    typedef QMap<QString, QMap<QString, QVariant>> ClassProperties;
+    QMap<int, ClassProperties> svgClassProperties;
+    QStringList oldCacheKeys;
+
     static QAtomicInt lastSerialNum;
 };
 
@@ -95,10 +127,21 @@ QSvgIconEngine::QSvgIconEngine(const QSvgIconEngine &other)
     : QIconEngine(other), d(new QSvgIconEnginePrivate)
 {
     d->svgFiles = other.d->svgFiles;
+    d->svgFilesMode = other.d->svgFilesMode;
+    d->integerMap = other.d->integerMap;
+    d->nonIntegerMap = other.d->nonIntegerMap;
+    d->serialNum = other.d->serialNum;
+    d->isMultiSize = other.d->isMultiSize;
+    d->isCacheBuf = other.d->isCacheBuf;
+    d->ratioMode = other.d->ratioMode;
+    d->svgClassProperties = other.d->svgClassProperties;
+    d->oldCacheKeys = other.d->oldCacheKeys;
     if (other.d->svgBuffers)
         d->svgBuffers = new QHash<int, QByteArray>(*other.d->svgBuffers);
     if (other.d->addedPixmaps)
         d->addedPixmaps = new QHash<int, QPixmap>(*other.d->addedPixmaps);
+    if (other.d->svgClassMap)
+        d->svgClassMap = new QMap<int, QStringList>(*other.d->svgClassMap);
 }
 
 
@@ -111,7 +154,7 @@ QSize QSvgIconEngine::actualSize(const QSize &size, QIcon::Mode mode,
                                  QIcon::State state)
 {
     if (d->addedPixmaps) {
-        QPixmap pm = d->addedPixmaps->value(d->hashKey(mode, state));
+        QPixmap pm = d->addedPixmaps->value(d->uniqueKey(size, mode, state));
         if (!pm.isNull() && pm.size() == size)
             return size;
     }
@@ -131,64 +174,160 @@ static QByteArray maybeUncompress(const QByteArray &ba)
 #endif
 }
 
-bool QSvgIconEnginePrivate::tryLoad(QSvgRenderer *renderer, QIcon::Mode mode, QIcon::State state)
+bool QSvgIconEngine::isPixmapCache(const QSize& size, QIcon::Mode mode, QIcon::State state) const
+{
+    if (d->addedPixmaps) {
+        QPixmap pm = d->addedPixmaps->value(d->uniqueKey(size, mode, state));
+        if (!pm.isNull() && pm.size() == size)
+            return true;    
+    }
+
+    return false;
+}
+
+void QSvgIconEngine::setPolicy(const bool& isMulti, const bool& isCache, const Qt::AspectRatioMode& mode)
+{
+    d->isMultiSize = isMulti;
+    d->isCacheBuf = isCache;
+    d->ratioMode = mode;
+}
+
+bool QSvgIconEnginePrivate::tryLoad(QSvgRenderer *renderer, QSize size, 
+                                    QIcon::Mode mode, QIcon::State state, bool bTryMatchSize)
 {
     if (svgBuffers) {
-        QByteArray buf = svgBuffers->value(hashKey(mode, state));
+        QByteArray buf = svgBuffers->value(uniqueKey(size, mode, state));
         if (!buf.isEmpty()) {
             buf = maybeUncompress(buf);
             renderer->load(buf);
             return true;
         }
     }
-    QString svgFile = svgFiles.value(hashKey(mode, state));
+
+    QString svgFile;
+    if (isMultiSize && bTryMatchSize) {
+        svgFile = svgFiles.value(pmKey(size, mode, state));
+    } else {
+        svgFile = svgFiles.value(hashKey(mode, state));
+    }
+
     if (!svgFile.isEmpty()) {
-        renderer->load(svgFile);
+        renderer->load(svgFile, svgClassProperties.value(hashKey(mode, state)));
         return true;
     }
     return false;
 }
 
-QIcon::Mode QSvgIconEnginePrivate::loadDataForModeAndState(QSvgRenderer *renderer, QIcon::Mode mode, QIcon::State state)
+QIcon::Mode QSvgIconEnginePrivate::loadDataForModeAndState(QSvgRenderer *renderer, QSize size, QIcon::Mode mode, QIcon::State state)
 {
-    if (tryLoad(renderer, mode, state))
+    if (tryLoad(renderer, size, mode, state, true))
         return mode;
+
+    if (isMultiSize)
+    {
+        QPair<QString, bool> result = tryMatch(size, mode, state);
+        if (!result.first.isEmpty())
+        {
+            renderer->load(result.first, svgClassProperties.value(hashKey(mode, state)));
+            return result.second ? mode : QIcon::Normal;
+        }
+    }
 
     const QIcon::State oppositeState = (state == QIcon::On) ? QIcon::Off : QIcon::On;
     if (mode == QIcon::Disabled || mode == QIcon::Selected) {
         const QIcon::Mode oppositeMode = (mode == QIcon::Disabled) ? QIcon::Selected : QIcon::Disabled;
-        if (tryLoad(renderer, QIcon::Normal, state))
+        if (tryLoad(renderer, size, QIcon::Normal, state, false))
             return QIcon::Normal;
-        if (tryLoad(renderer, QIcon::Active, state))
+        if (tryLoad(renderer, size, QIcon::Active, state, false))
             return QIcon::Active;
-        if (tryLoad(renderer, mode, oppositeState))
+        if (tryLoad(renderer, size, mode, oppositeState, false))
             return mode;
-        if (tryLoad(renderer, QIcon::Normal, oppositeState))
+        if (tryLoad(renderer, size, QIcon::Normal, oppositeState, false))
             return QIcon::Normal;
-        if (tryLoad(renderer, QIcon::Active, oppositeState))
+        if (tryLoad(renderer, size, QIcon::Active, oppositeState, false))
             return QIcon::Active;
-        if (tryLoad(renderer, oppositeMode, state))
+        if (tryLoad(renderer,size,  oppositeMode, state, false))
             return oppositeMode;
-        if (tryLoad(renderer, oppositeMode, oppositeState))
+        if (tryLoad(renderer, size, oppositeMode, oppositeState, false))
             return oppositeMode;
     } else {
         const QIcon::Mode oppositeMode = (mode == QIcon::Normal) ? QIcon::Active : QIcon::Normal;
-        if (tryLoad(renderer, oppositeMode, state))
+        if (tryLoad(renderer, size, oppositeMode, state, false))
             return oppositeMode;
-        if (tryLoad(renderer, mode, oppositeState))
+        if (tryLoad(renderer, size, mode, oppositeState, false))
             return mode;
-        if (tryLoad(renderer, oppositeMode, oppositeState))
+        if (tryLoad(renderer, size, oppositeMode, oppositeState, false))
             return oppositeMode;
-        if (tryLoad(renderer, QIcon::Disabled, state))
+        if (tryLoad(renderer, size, QIcon::Disabled, state, false))
             return QIcon::Disabled;
-        if (tryLoad(renderer, QIcon::Selected, state))
+        if (tryLoad(renderer, size, QIcon::Selected, state, false))
             return QIcon::Selected;
-        if (tryLoad(renderer, QIcon::Disabled, oppositeState))
+        if (tryLoad(renderer, size, QIcon::Disabled, oppositeState, false))
             return QIcon::Disabled;
-        if (tryLoad(renderer, QIcon::Selected, oppositeState))
+        if (tryLoad(renderer, size, QIcon::Selected, oppositeState, false))
             return QIcon::Selected;
     }
     return QIcon::Normal;
+}
+
+QPair<QString, bool> QSvgIconEnginePrivate::tryMatch(const QSize &size, QIcon::Mode mode, QIcon::State state)
+{
+    Q_UNUSED(state);
+    QString svgMatchFile;
+    bool bSameMode = false;
+
+    QList<int> keys = svgFilesMode.keys();
+    for (int key : keys) {
+        //find same mode
+        if (mode == svgFilesMode.value(key)) {
+            bSameMode = true;
+            QString svgFile = svgFiles.value(key);
+            svgMatchFile = svgFile;
+            QPixmap pixmap(svgFile);
+            QSize fileSize = pixmap.size();
+            float scale = (float)size.width()/(float)fileSize.width();
+            //integer multiple
+            if (scale == (int)scale) {
+                integerMap.insert(scale, svgFile);
+            } else {
+                nonIntegerMap.insert(scale, svgFile);
+            }
+        }
+    }
+
+    //choose minimum integer or nonInteger multiple file
+    if (!integerMap.isEmpty()) {
+        svgMatchFile = integerMap.begin().value();
+    } else if (!nonIntegerMap.isEmpty()) {
+        svgMatchFile = nonIntegerMap.begin().value();
+    }
+
+    //no same mode file,use normal file
+    if (!bSameMode) {
+        svgMatchFile = svgFiles.value(pmKey(size, QIcon::Normal, QIcon::Off));
+        if (svgMatchFile.isEmpty() && !svgFiles.isEmpty())
+            svgMatchFile = svgFiles.begin().value();
+    }
+
+    return qMakePair(svgMatchFile, bSameMode);
+}
+
+void QSvgIconEnginePrivate::addSvgClass(QIcon::Mode mode, QIcon::State state,
+                                        const QStringList &svgClass)
+{
+    if (!svgClassMap)
+        svgClassMap = new QMap<int, QStringList>();
+
+    int key = hashKey(mode, state);
+    QMap<int, QStringList>::iterator it = svgClassMap->find(key);
+    if (it != svgClassMap->end()) {
+        for (QString className : svgClass) {
+            if (!it.value().contains(className))
+                it.value().append(className);
+        }
+    } else {
+        svgClassMap->insert(key, svgClass);
+    }
 }
 
 QPixmap QSvgIconEngine::pixmap(const QSize &size, QIcon::Mode mode,
@@ -201,19 +340,19 @@ QPixmap QSvgIconEngine::pixmap(const QSize &size, QIcon::Mode mode,
         return pm;
 
     if (d->addedPixmaps) {
-        pm = d->addedPixmaps->value(d->hashKey(mode, state));
+        pm = d->addedPixmaps->value(d->uniqueKey(size, mode, state));
         if (!pm.isNull() && pm.size() == size)
             return pm;
     }
 
     QSvgRenderer renderer;
-    const QIcon::Mode loadmode = d->loadDataForModeAndState(&renderer, mode, state);
+    const QIcon::Mode loadmode = d->loadDataForModeAndState(&renderer, size, mode, state);
     if (!renderer.isValid())
         return pm;
 
     QSize actualSize = renderer.defaultSize();
     if (!actualSize.isNull())
-        actualSize.scale(size, Qt::KeepAspectRatio);
+        actualSize.scale(size, d->ratioMode);
 
     if (actualSize.isEmpty())
         return QPixmap();
@@ -232,8 +371,10 @@ QPixmap QSvgIconEngine::pixmap(const QSize &size, QIcon::Mode mode,
         }
     }
 
-    if (!pm.isNull())
+    if (!pm.isNull()) {
         QPixmapCache::insert(pmckey, pm);
+        d->oldCacheKeys.append(pmckey);
+    }
 
     return pm;
 }
@@ -245,7 +386,7 @@ void QSvgIconEngine::addPixmap(const QPixmap &pixmap, QIcon::Mode mode,
     if (!d->addedPixmaps)
         d->addedPixmaps = new QHash<int, QPixmap>;
     d->stepSerialNum();
-    d->addedPixmaps->insert(d->hashKey(mode, state), pixmap);
+    d->addedPixmaps->insert(d->uniqueKey(pixmap.size(), mode, state), pixmap);
 }
 
 enum FileType { OtherFile, SvgFile, CompressedSvgFile };
@@ -269,7 +410,7 @@ static FileType fileType(const QFileInfo &fi)
     return OtherFile;
 }
 
-void QSvgIconEngine::addFile(const QString &fileName, const QSize &,
+void QSvgIconEngine::addFile(const QString &fileName, const QSize & size,
                              QIcon::Mode mode, QIcon::State state)
 {
     if (!fileName.isEmpty()) {
@@ -284,7 +425,17 @@ void QSvgIconEngine::addFile(const QString &fileName, const QSize &,
              QSvgRenderer renderer(abs);
              if (renderer.isValid()) {
                  d->stepSerialNum();
-                 d->svgFiles.insert(d->hashKey(mode, state), abs);
+                 d->addSvgClass(mode, state, renderer.xmlClassList());
+                 if (d->isMultiSize) {
+                    QSize recordSize = size;
+                    if (recordSize == QSize()) {
+                        recordSize = QPixmap(abs).size();
+                    }
+                    d->svgFiles.insert(pmKey(recordSize, mode, state), abs);
+                    d->svgFilesMode.insert(pmKey(recordSize, mode, state), mode);
+                } else {
+                    d->svgFiles.insert(d->hashKey(mode, state), abs);
+                }
              }
          } else if (type == OtherFile) {
              QPixmap pm(abs);
@@ -292,6 +443,45 @@ void QSvgIconEngine::addFile(const QString &fileName, const QSize &,
                  addPixmap(pm, mode, state);
          }
     }
+}
+
+QStringList QSvgIconEngine::styleClassList(QIcon::Mode mode, QIcon::State state) const
+{
+    return d->svgClassMap ? (*d->svgClassMap).value(d->hashKey(mode, state)) : QStringList();
+}
+
+void QSvgIconEngine::setStyleClass(const QString &xmlClass, const QString &property,
+                                   const QVariant &value, QIcon::Mode mode, QIcon::State state)
+{
+    int key = d->hashKey(mode, state);
+    QMap<int, QSvgIconEnginePrivate::ClassProperties>::iterator it =
+            d->svgClassProperties.find(key);
+    if (it == d->svgClassProperties.end()) {
+        QSvgIconEnginePrivate::ClassProperties classProperties;
+        QMap<QString, QVariant> propertyMap;
+        propertyMap.insert(property, value);
+        classProperties.insert(xmlClass, propertyMap);
+        d->svgClassProperties.insert(key, classProperties);
+    } else {
+        QSvgIconEnginePrivate::ClassProperties::iterator jt = it.value().find(xmlClass);
+        if (jt == it.value().end()) {
+            QMap<QString, QVariant> propertyMap;
+            propertyMap.insert(property, value);
+            it.value().insert(xmlClass, propertyMap);
+        } else {
+            jt->insert(property, value);
+        }
+    }
+
+    for (QString oldKey : d->oldCacheKeys) {
+        QPixmapCache::remove(oldKey);
+    }
+    d->oldCacheKeys.clear();
+}
+
+void QSvgIconEngine::clearStyleClass(QIcon::Mode mode, QIcon::State state)
+{
+    d->svgClassProperties.remove(d->hashKey(mode, state));
 }
 
 void QSvgIconEngine::paint(QPainter *painter, const QRect &rect,
@@ -317,23 +507,40 @@ QIconEngine *QSvgIconEngine::clone() const
 bool QSvgIconEngine::read(QDataStream &in)
 {
     d = new QSvgIconEnginePrivate;
-    d->svgBuffers = new QHash<int, QByteArray>;
+    int tempRatioMode = 0;
+    in >> d->isMultiSize >> d->isCacheBuf >> tempRatioMode;
+    d->ratioMode = static_cast<Qt::AspectRatioMode>(tempRatioMode);
+    if (d->isCacheBuf) {
+        d->svgBuffers = new QHash<int, QByteArray>;
+    }
 
     if (in.version() >= QDataStream::Qt_4_4) {
-        int isCompressed;
-        QHash<int, QString> fileNames;  // For memoryoptimization later
-        in >> fileNames >> isCompressed >> *d->svgBuffers;
+        if (d->isCacheBuf) {
+            int isCompressed;
+            if (d->isMultiSize) {
+                in >> d->svgFiles >> d->svgFilesMode >> isCompressed >> *d->svgBuffers;
+            } else {
+                QHash<int, QString> fileNames;  // For memoryoptimization later
+                in >> fileNames >> isCompressed >> *d->svgBuffers;
+            }
 #ifndef QT_NO_COMPRESS
-        if (!isCompressed) {
-            for (auto it = d->svgBuffers->begin(), end = d->svgBuffers->end(); it != end; ++it)
-                it.value() = qCompress(it.value());
-        }
+            if (!isCompressed) {
+                for (auto it = d->svgBuffers->begin(), end = d->svgBuffers->end(); it != end; ++it)
+                    it.value() = qCompress(it.value());
+            }
 #else
-        if (isCompressed) {
-            qWarning("QSvgIconEngine: Can not decompress SVG data");
-            d->svgBuffers->clear();
-        }
+            if (isCompressed) {
+                qWarning("QSvgIconEngine: Can not decompress SVG data");
+                d->svgBuffers->clear();
+            }
 #endif
+        } else {
+            if (d->isMultiSize) {
+                in >> d->svgFiles >> d->svgFilesMode;
+            } else{
+                in >> d->svgFiles;
+            }
+        }
         int hasAddedPixmaps;
         in >> hasAddedPixmaps;
         if (hasAddedPixmaps) {
@@ -375,6 +582,8 @@ bool QSvgIconEngine::read(QDataStream &in)
 bool QSvgIconEngine::write(QDataStream &out) const
 {
     if (out.version() >= QDataStream::Qt_4_4) {
+        out << d->isMultiSize << d->isCacheBuf << d->ratioMode;
+    if (d->isCacheBuf) {
         int isCompressed = 0;
 #ifndef QT_NO_COMPRESS
         isCompressed = 1;
@@ -392,7 +601,20 @@ bool QSvgIconEngine::write(QDataStream &out) const
 #endif
             svgBuffers.insert(it.key(), buf);
         }
-        out << d->svgFiles << isCompressed << svgBuffers;
+        if (d->isMultiSize) {
+            out << d->svgFiles << d->svgFilesMode << isCompressed << svgBuffers;
+        } else {
+            out << d->svgFiles << isCompressed << svgBuffers;
+        }
+
+    } else {
+        if (d->isMultiSize) {
+            out << d->svgFiles << d->svgFilesMode;
+        } else {
+            out << d->svgFiles;
+        }
+    }
+
         if (d->addedPixmaps)
             out << (int)1 << *d->addedPixmaps;
         else
@@ -423,7 +645,7 @@ bool QSvgIconEngine::write(QDataStream &out) const
 void QSvgIconEngine::virtual_hook(int id, void *data)
 {
     if (id == QIconEngine::IsNullHook) {
-        *reinterpret_cast<bool*>(data) = d->svgFiles.isEmpty() && !d->addedPixmaps && (!d->svgBuffers || d->svgBuffers->isEmpty());
+        *reinterpret_cast<bool*>(data) = !d->isMultiSize && d->svgFiles.isEmpty() && !d->addedPixmaps && (!d->svgBuffers || d->svgBuffers->isEmpty());
     }
     QIconEngine::virtual_hook(id, data);
 }

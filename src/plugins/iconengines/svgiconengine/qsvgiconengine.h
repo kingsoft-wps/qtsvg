@@ -60,10 +60,23 @@ public:
     QPixmap pixmap(const QSize &size, QIcon::Mode mode,
                    QIcon::State state) override;
 
+    bool isPixmapCache(const QSize& size, 
+                        QIcon::Mode mode = QIcon::Normal, 
+                        QIcon::State state = QIcon::Off) const override;
+    void setPolicy(const bool& isMultiSize, 
+                    const bool& isCacheBuf, 
+                    const Qt::AspectRatioMode& mode) override;
+
     void addPixmap(const QPixmap &pixmap, QIcon::Mode mode,
                    QIcon::State state) override;
     void addFile(const QString &fileName, const QSize &size,
                  QIcon::Mode mode, QIcon::State state) override;
+
+    QStringList styleClassList(QIcon::Mode mode = QIcon::Normal,
+                               QIcon::State state = QIcon::Off) const override;
+    void setStyleClass(const QString &xmlClass, const QString &property, const QVariant &value,
+                       QIcon::Mode mode = QIcon::Normal, QIcon::State state = QIcon::Off) override;
+    void clearStyleClass(QIcon::Mode mode = QIcon::Normal, QIcon::State state = QIcon::Off) override;
 
     QString key() const override;
     QIconEngine *clone() const override;

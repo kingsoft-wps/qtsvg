@@ -56,19 +56,67 @@
 
 QT_BEGIN_NAMESPACE
 
-QSvgTinyDocument::QSvgTinyDocument()
-    : QSvgStructureNode(0)
-    , m_widthPercent(false)
-    , m_heightPercent(false)
-    , m_animated(false)
-    , m_animationDuration(0)
-    , m_fps(30)
+static void initNamedNodes(const QList<QSvgNode *> &renders, QHash<QString, QSvgNode *> &namedNodes)
 {
+    for (QSvgNode *node : renders) {
+        if (!node->nodeId().isEmpty())
+            namedNodes.insert(node->nodeId(), node);
+
+        switch (node->type()) {
+        case QSvgNode::G:
+        case QSvgNode::DEFS:
+        case QSvgNode::SWITCH:
+            initNamedNodes((static_cast<QSvgStructureNode *>(node))->renderers(), namedNodes);
+        default:
+            break;
+        }
+    }
 }
 
-QSvgTinyDocument::~QSvgTinyDocument()
+QSvgTinyDocument::QSvgTinyDocument(QSvgNode *parent /*= nullptr*/)
+    : QSvgStructureNode(parent)
+	, m_widthPercent(false)
+	, m_heightPercent(false)
+	, m_animated(false)
+	, m_firstRender(true)
+	, m_animationDuration(0)
+	, m_fps(30)
 {
 }
+QSvgTinyDocument::QSvgTinyDocument(const QSvgTinyDocument &other)
+    : QSvgStructureNode(other)
+	, m_coord(other.m_coord)
+	, m_size(other.m_size)
+	, m_widthPercent(other.m_widthPercent)
+	, m_heightPercent(other.m_heightPercent)
+	, m_firstRender(other.m_firstRender)
+	, m_viewBox(other.m_viewBox)
+	, m_fonts(other.m_fonts)
+	, m_namedStyles(other.m_namedStyles)
+	, m_time(other.m_time)
+	, m_animated(other.m_animated)
+	, m_animationDuration(other.m_animationDuration)
+	, m_fps(other.m_fps)
+	, m_states(other.m_states)
+	, m_svgProp(other.m_svgProp)
+	, m_xmlClassList(other.m_xmlClassList)
+{
+    m_namedNodes.reserve(other.m_namedNodes.size());
+    initNamedNodes(m_renderers, m_namedNodes);
+    Q_ASSERT(m_renderers.size() == other.m_renderers.size());
+
+    // fix doc-pointer for unresloved gradient link
+    for (auto iter = m_namedStyles.begin(); iter != m_namedStyles.end(); ++iter) {
+        QSvgStyleProperty *style = (*iter);
+        if (style->type() == QSvgStyleProperty::GRADIENT) {
+            QSvgGradientStyle *graStyle = static_cast<QSvgGradientStyle *>(style);
+            if (!graStyle->stopLink().isEmpty())
+                graStyle->setStopLink(graStyle->stopLink(), this);
+        }
+    }
+}
+
+QSvgTinyDocument::~QSvgTinyDocument() {}
 
 #ifndef QT_NO_COMPRESS
 static QByteArray qt_inflateSvgzDataFrom(QIODevice *device, bool doCheckContent = true);
@@ -186,7 +234,7 @@ static QByteArray qt_inflateSvgzDataFrom(QIODevice *)
 }
 #endif
 
-QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName)
+QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName, std::function<QPixmap(const QImage& img)> convertFunc)
 {
     QFile file(fileName);
     if (!file.open(QFile::ReadOnly)) {
@@ -197,14 +245,15 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName)
 
     if (fileName.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive)
             || fileName.endsWith(QLatin1String(".svg.gz"), Qt::CaseInsensitive)) {
-        return load(qt_inflateSvgzDataFrom(&file));
+        return load(qt_inflateSvgzDataFrom(&file), convertFunc);
     }
 
     QSvgTinyDocument *doc = 0;
-    QSvgHandler handler(&file);
+    QSvgHandler handler(&file, convertFunc);
     if (handler.ok()) {
         doc = handler.document();
         doc->m_animationDuration = handler.animationDuration();
+        doc->appendXmlClass(handler.xmlClasses());
     } else {
         qCWarning(lcSvgHandler, "Cannot read file '%s', because: %s (line %d)",
                  qPrintable(fileName), qPrintable(handler.errorString()), handler.lineNumber());
@@ -213,7 +262,7 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName)
     return doc;
 }
 
-QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents)
+QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents, std::function<QPixmap(const QImage& img)> convertFunc)
 {
     QByteArray svg;
     // Check for gzip magic number and inflate if appropriate
@@ -230,7 +279,7 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents)
     QBuffer buffer;
     buffer.setData(svg);
     buffer.open(QIODevice::ReadOnly);
-    QSvgHandler handler(&buffer);
+    QSvgHandler handler(&buffer, convertFunc);
 
     QSvgTinyDocument *doc = nullptr;
     if (handler.ok()) {
@@ -242,9 +291,9 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents)
     return doc;
 }
 
-QSvgTinyDocument * QSvgTinyDocument::load(QXmlStreamReader *contents)
+QSvgTinyDocument * QSvgTinyDocument::load(QXmlStreamReader *contents, std::function<QPixmap(const QImage& img)> convertFunc)
 {
-    QSvgHandler handler(contents);
+    QSvgHandler handler(contents, convertFunc);
 
     QSvgTinyDocument *doc = 0;
     if (handler.ok()) {
@@ -256,26 +305,75 @@ QSvgTinyDocument * QSvgTinyDocument::load(QXmlStreamReader *contents)
     return doc;
 }
 
-void QSvgTinyDocument::draw(QPainter *p, const QRectF &bounds)
+QSvgTinyDocument *
+QSvgTinyDocument::load(const QString &fileName,
+                       const QMap<QString, QMap<QString, QVariant>> &classProperties,
+                       std::function<QPixmap(const QImage &img)> convertFunc)
 {
-    if (m_time.isNull()) {
+    QFile file(fileName);
+    if (!file.open(QFile::ReadOnly)) {
+        qWarning("Cannot open file '%s', because: %s", qPrintable(fileName),
+                 qPrintable(file.errorString()));
+        return 0;
+    }
+
+#ifndef QT_NO_COMPRESS
+    if (fileName.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive)
+        || fileName.endsWith(QLatin1String(".svg.gz"), Qt::CaseInsensitive)) {
+        return load(qt_inflateGZipDataFrom(&file), convertFunc);
+    }
+#endif
+
+    QSvgTinyDocument *doc = 0;
+    QSvgHandler handler(&file, classProperties, convertFunc);
+    if (handler.ok()) {
+        doc = handler.document();
+        doc->m_animationDuration = handler.animationDuration();
+    } else {
+        qWarning("Cannot read file '%s', because: %s (line %d)", qPrintable(fileName),
+                 qPrintable(handler.errorString()), handler.lineNumber());
+    }
+    return doc;
+}
+
+void QSvgTinyDocument::draw(QPainter *p, const QRectF &bounds, const QRectF & source)
+{
+    if (m_animated && m_time.isNull()) {
         m_time.start();
     }
 
     if (displayMode() == QSvgNode::NoneMode)
         return;
 
+    // make sure all node's cachebound valid
+    if (m_firstRender) {
+        m_firstRender = false;
+        transformedBounds();
+    }
+
     p->save();
-    //sets default style on the painter
-    //### not the most optimal way
-    mapSourceToTarget(p, bounds);
-    QPen pen(Qt::NoBrush, 1, Qt::SolidLine, Qt::FlatCap, Qt::SvgMiterJoin);
-    pen.setMiterLimit(4);
-    p->setPen(pen);
-    p->setBrush(Qt::black);
-    p->setRenderHint(QPainter::Antialiasing);
-    p->setRenderHint(QPainter::SmoothPixmapTransform);
-    QList<QSvgNode*>::iterator itr = m_renderers.begin();
+    if (nullptr == parent()) {
+        // sets default style on the painter
+        //### not the most optimal way
+        mapSourceToTarget(p, bounds, source);
+
+        // QFont-initial-data from official-documents and QSvgHandle
+        // defult-family, font-size-medium(12.0), font-weight-normal(400), font-style-normal;
+        QFont font(QLatin1String("Arial"), 12, QFont::Normal, false);
+        font.setCapitalization(QFont::MixedCase);
+
+        QPen pen(Qt::NoBrush, 1, Qt::SolidLine, Qt::FlatCap, Qt::SvgMiterJoin);
+        pen.setMiterLimit(4);
+        p->setFont(font);
+        p->setPen(pen);
+        p->setBrush(Qt::black);
+        p->setRenderHint(QPainter::Antialiasing);
+        p->setRenderHint(QPainter::SmoothPixmapTransform);
+    } else {
+        mapSourceToTarget(p, QRectF(m_coord, size()), viewBox());
+	}
+
+    QList<QSvgNode *>::iterator itr = m_renderers.begin();
     applyStyle(p, m_states);
     while (itr != m_renderers.end()) {
         QSvgNode *node = *itr;
@@ -297,7 +395,7 @@ void QSvgTinyDocument::draw(QPainter *p, const QString &id,
         qCDebug(lcSvgHandler, "Couldn't find node %s. Skipping rendering.", qPrintable(id));
         return;
     }
-    if (m_time.isNull()) {
+    if (m_animated && m_time.isNull()) {
         m_time.start();
     }
 
@@ -352,6 +450,13 @@ QSvgNode::Type QSvgTinyDocument::type() const
     return DOC;
 }
 
+QSvgNode *QSvgTinyDocument::clone(QSvgNode *parent)
+{
+    QSvgTinyDocument *newDoc = new QSvgTinyDocument(*this);
+    newDoc->setParent(parent);
+    return newDoc;
+}
+
 void QSvgTinyDocument::setWidth(int len, bool percent)
 {
     m_size.setWidth(len);
@@ -404,7 +509,8 @@ QSvgFillStyleProperty *QSvgTinyDocument::namedStyle(const QString &id) const
 
 void QSvgTinyDocument::restartAnimation()
 {
-    m_time.restart();
+    if (m_animated)
+        m_time.restart();
 }
 
 bool QSvgTinyDocument::animated() const
@@ -419,7 +525,7 @@ void QSvgTinyDocument::setAnimated(bool a)
 
 void QSvgTinyDocument::draw(QPainter *p)
 {
-    draw(p, QRectF());
+    draw(p, QRectF(), QRectF());
 }
 
 void QSvgTinyDocument::draw(QPainter *p, QSvgExtraStates &)
@@ -471,7 +577,7 @@ bool QSvgTinyDocument::elementExists(const QString &id) const
 {
     QSvgNode *node = scopeNode(id);
 
-    return (node!=0);
+    return (node != 0);
 }
 
 QMatrix QSvgTinyDocument::matrixForElement(const QString &id) const
@@ -497,7 +603,10 @@ QMatrix QSvgTinyDocument::matrixForElement(const QString &id) const
 
 int QSvgTinyDocument::currentFrame() const
 {
-    double runningPercentage = qMin(m_time.elapsed()/double(m_animationDuration), 1.);
+    if (!m_animated)
+        return 0;
+
+    double runningPercentage = qMin(m_time.elapsed() / double(m_animationDuration), 1.);
 
     int totalFrames = m_fps * m_animationDuration;
 
@@ -506,6 +615,9 @@ int QSvgTinyDocument::currentFrame() const
 
 void QSvgTinyDocument::setCurrentFrame(int frame)
 {
+    if (!m_animated)
+        return ;
+
     int totalFrames = m_fps * m_animationDuration;
     double framePercentage = frame/double(totalFrames);
     double timeForFrame = m_animationDuration * framePercentage; //in S
@@ -517,6 +629,19 @@ void QSvgTinyDocument::setCurrentFrame(int frame)
 void QSvgTinyDocument::setFramesPerSecond(int num)
 {
     m_fps = num;
+}
+
+void QSvgTinyDocument::appendXmlClass(const QStringList &xmlClasses)
+{
+    for (QString className : xmlClasses) {
+        if (!m_xmlClassList.contains(className))
+            m_xmlClassList.append(className);
+    }
+}
+
+QStringList QSvgTinyDocument::xmlClassList()
+{
+    return m_xmlClassList;
 }
 
 QT_END_NAMESPACE

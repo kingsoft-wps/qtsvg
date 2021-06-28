@@ -71,6 +71,21 @@ void QSvgFont::addGlyph(QChar unicode, const QPainterPath &path, qreal horizAdvX
                                        (horizAdvX==-1)?m_horizAdvX:horizAdvX));
 }
 
+int QSvgFont::textWidth(const QString &str) const
+{
+    int lineWidth = 0;
+    QString::const_iterator itr = str.constBegin();
+    for (; itr != str.constEnd(); ++itr) {
+        QChar unicode = *itr;
+        if (!m_glyphs.contains(*itr)) {
+            unicode = 0;
+            if (!m_glyphs.contains(unicode))
+                continue;
+        }
+        lineWidth += static_cast<int>(m_glyphs[unicode].m_horizAdvX);
+    }
+    return lineWidth;
+}
 
 void QSvgFont::draw(QPainter *p, const QPointF &point, const QString &str, qreal pixelSize, Qt::Alignment alignment) const
 {
@@ -79,23 +94,13 @@ void QSvgFont::draw(QPainter *p, const QPointF &point, const QString &str, qreal
     p->scale(pixelSize / m_unitsPerEm, -pixelSize / m_unitsPerEm);
 
     // Calculate the text width to be used for alignment
-    int textWidth = 0;
-    QString::const_iterator itr = str.constBegin();
-    for ( ; itr != str.constEnd(); ++itr) {
-        QChar unicode = *itr;
-        if (!m_glyphs.contains(*itr)) {
-            unicode = 0;
-            if (!m_glyphs.contains(unicode))
-                continue;
-        }
-        textWidth += static_cast<int>(m_glyphs[unicode].m_horizAdvX);
-    }
+    int lineWidth = textWidth(str);
 
     QPoint alignmentOffset(0, 0);
     if (alignment == Qt::AlignHCenter) {
-        alignmentOffset.setX(-textWidth / 2);
+        alignmentOffset.setX(-lineWidth / 2);
     } else if (alignment == Qt::AlignRight) {
-        alignmentOffset.setX(-textWidth);
+        alignmentOffset.setX(-lineWidth);
     }
 
     p->translate(alignmentOffset);
@@ -108,7 +113,7 @@ void QSvgFont::draw(QPainter *p, const QPointF &point, const QString &str, qreal
     pen.setWidthF(penWidth);
     p->setPen(pen);
 
-    itr = str.constBegin();
+    QString::const_iterator itr = str.constBegin();
     for ( ; itr != str.constEnd(); ++itr) {
         QChar unicode = *itr;
         if (!m_glyphs.contains(*itr)) {

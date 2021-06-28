@@ -313,7 +313,7 @@ static bool loadDocument(QSvgRenderer *const q,
                          const TInputType &in)
 {
     delete d->render;
-    d->render = QSvgTinyDocument::load(in);
+    d->render = QSvgTinyDocument::load(in, nullptr);
     if (d->render && !d->render->size().isValid()) {
         delete d->render;
         d->render = nullptr;
@@ -331,6 +331,29 @@ static bool loadDocument(QSvgRenderer *const q,
     }
 
     //force first update
+    QSvgRendererPrivate::callRepaintNeeded(q);
+
+    return d->render;
+}
+
+template<typename TInputType>
+static bool loadDocument(QSvgRenderer *const q, QSvgRendererPrivate *const d, const TInputType &in,
+                         const QMap<QString, QMap<QString, QVariant>> classProperties)
+{
+    delete d->render;
+    d->render = QSvgTinyDocument::load(in, classProperties, nullptr);
+    if (d->render && d->render->animated() && d->fps > 0) {
+        if (!d->timer)
+            d->timer = new QTimer(q);
+        else
+            d->timer->stop();
+        q->connect(d->timer, SIGNAL(timeout()), q, SIGNAL(repaintNeeded()));
+        d->timer->start(1000 / d->fps);
+    } else if (d->timer) {
+        d->timer->stop();
+    }
+
+    // force first update
     QSvgRendererPrivate::callRepaintNeeded(q);
 
     return d->render;
@@ -369,6 +392,13 @@ bool QSvgRenderer::load(QXmlStreamReader *contents)
 {
     Q_D(QSvgRenderer);
     return loadDocument(this, d, contents);
+}
+
+bool QSvgRenderer::load(const QString &filename,
+                        const QMap<QString, QMap<QString, QVariant>> &classProperties)
+{
+    Q_D(QSvgRenderer);
+    return loadDocument(this, d, filename, classProperties);
 }
 
 /*!
@@ -414,7 +444,7 @@ void QSvgRenderer::render(QPainter *painter, const QRectF &bounds)
 {
     Q_D(QSvgRenderer);
     if (d->render) {
-        d->render->draw(painter, bounds);
+        d->render->draw(painter, bounds, QRectF());
     }
 }
 
@@ -495,6 +525,15 @@ QMatrix QSvgRenderer::matrixForElement(const QString &id) const
     if (d->render)
         mat = d->render->matrixForElement(id);
     return mat;
+}
+
+QStringList QSvgRenderer::xmlClassList()
+{
+    Q_D(QSvgRenderer);
+    if (d->render)
+        return d->render->xmlClassList();
+
+    return QStringList();
 }
 
 QT_END_NAMESPACE

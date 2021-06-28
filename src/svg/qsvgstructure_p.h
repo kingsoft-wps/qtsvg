@@ -68,12 +68,13 @@ class Q_SVG_PRIVATE_EXPORT QSvgStructureNode : public QSvgNode
 {
 public:
     QSvgStructureNode(QSvgNode *parent);
+    QSvgStructureNode(const QSvgStructureNode &other);
     ~QSvgStructureNode();
     QSvgNode *scopeNode(const QString &id) const;
     void addChild(QSvgNode *child, const QString &id);
-    QRectF bounds(QPainter *p, QSvgExtraStates &states) const override;
+    QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const override;
     QSvgNode *previousSiblingNode(QSvgNode *n) const;
-    QList<QSvgNode*> renderers() const { return m_renderers; }
+    const QList<QSvgNode*>& renderers() const { return m_renderers; }
 protected:
     QList<QSvgNode*>          m_renderers;
     QHash<QString, QSvgNode*> m_scope;
@@ -86,6 +87,7 @@ class Q_SVG_PRIVATE_EXPORT QSvgG : public QSvgStructureNode
 public:
     QSvgG(QSvgNode *parent);
     void draw(QPainter *p, QSvgExtraStates &states) override;
+    QSvgNode *clone(QSvgNode *parent) override;
     Type type() const override;
 };
 
@@ -94,6 +96,7 @@ class Q_SVG_PRIVATE_EXPORT QSvgDefs : public QSvgStructureNode
 public:
     QSvgDefs(QSvgNode *parent);
     void draw(QPainter *p, QSvgExtraStates &states) override;
+    QSvgNode *clone(QSvgNode *parent) override;
     Type type() const override;
 };
 
@@ -101,13 +104,88 @@ class Q_SVG_PRIVATE_EXPORT QSvgSwitch : public QSvgStructureNode
 {
 public:
     QSvgSwitch(QSvgNode *parent);
+    QSvgSwitch(const QSvgSwitch& other);
     void draw(QPainter *p, QSvgExtraStates &states) override;
+    QSvgNode *clone(QSvgNode *parent) override;
     Type type() const override;
 private:
     void init();
 private:
     QString m_systemLanguage;
     QString m_systemLanguagePrefix;
+};
+
+class Q_SVG_PRIVATE_EXPORT QSvgMarker : public QSvgStructureNode
+{
+public:
+    QSvgMarker(QSvgNode *parent);
+    void draw(QPainter *p, QSvgExtraStates &states) override;
+    QSvgNode *clone(QSvgNode *parent) override;
+    Type type() const override;
+
+public:
+    enum MarkerUnits 
+    { 
+        userSpaceOnUse,
+        strokeWidth 
+    };
+
+    bool viewBoxValid() const;
+    const QRectF& viewBox() const;
+    void setViewBox(const QRectF &rect) { m_viewBox = rect; }
+
+    MarkerUnits unitsMode() const { return m_unitsMode; }
+    void setUnitsMode(MarkerUnits unitsMode) { m_unitsMode = unitsMode; }
+
+    const QPointF& ref() const { return m_ref; }
+    void setRef(const QPointF &point) { m_ref = point; }
+
+    bool isAutoOrient() const { return m_bAutoOrient; }
+    qreal orientAngle() const { return m_orientAngle; }
+    void enableAutoOrient(bool bAuto) { m_bAutoOrient = bAuto; }
+    void setOrientAngle(qreal angle);
+
+    const QSize& size() const { return m_size; }
+    void setSize(const QSize &point) { m_size = point; }
+
+    void draw(QPainter *p, QSvgExtraStates &states, const QPointF &origin, qreal angle, qreal strokeWidth);
+
+private:
+    bool m_bAutoOrient;
+    MarkerUnits m_unitsMode;
+    mutable QRectF m_viewBox;
+    QPointF m_ref;
+    qreal m_orientAngle;
+    QSize m_size;
+};
+
+class Q_SVG_PRIVATE_EXPORT QSvgClipPath : public QSvgStructureNode
+{
+public:
+    QSvgClipPath(QSvgNode *parent);
+    void draw(QPainter *p, QSvgExtraStates &states) override;
+    QSvgNode *clone(QSvgNode *parent) override;
+    Type type() const override;
+
+public:
+    enum CoordinateMode 
+    { 
+        userSpaceOnUse, 
+        objectBoundingBox 
+    };
+
+    CoordinateMode getCoordinateMode() const { return m_coordinateMode; }
+    void setCoordinateMode(CoordinateMode mode) { m_coordinateMode = mode; }
+
+    void parseClipPathList();
+    const QVector<QPainterPath> &getClipPathList() const { return m_pathList; }
+
+    bool isParsed() const { return m_bParsed; }
+
+private:
+    bool m_bParsed;
+    CoordinateMode m_coordinateMode;
+    QVector<QPainterPath> m_pathList;
 };
 
 QT_END_NAMESPACE

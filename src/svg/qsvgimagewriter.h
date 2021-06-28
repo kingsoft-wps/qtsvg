@@ -37,63 +37,36 @@
 **
 ****************************************************************************/
 
-#ifndef QSVGFONT_P_H
-#define QSVGFONT_P_H
+#ifndef QSVGIMAGEWRITER_H
+#define QSVGIMAGEWRITER_H
 
-//
-//  W A R N I N G
-//  -------------
-//
-// This file is not part of the Qt API.  It exists purely as an
-// implementation detail.  This header file may change from version to
-// version without notice, or even be removed.
-//
-// We mean it.
-//
+#ifndef QT_NO_SVG
 
-#include "qpainterpath.h"
-#include "qhash.h"
-#include "qstring.h"
-#include "qsvgstyle_p.h"
-#include "qtsvgglobal_p.h"
+#include "QtCore/qglobal.h"
+#include <QtCore/QScopedPointer>
+#include <QtSvg/qtsvgglobal.h>
 
 QT_BEGIN_NAMESPACE
 
-class Q_SVG_PRIVATE_EXPORT QSvgGlyph
+class QSvgTinyDocument;
+class QIODevice;
+class QByteArray;
+class QSvgImageWriterPrivate;
+class Q_SVG_EXPORT QSvgImageWriter
 {
 public:
-    QSvgGlyph(QChar unicode, const QPainterPath &path, qreal horizAdvX);
-    QSvgGlyph() : m_unicode(0), m_horizAdvX(0) {}
+    QSvgImageWriter(const QSvgTinyDocument* doc, QIODevice* device);
+    QSvgImageWriter(const QSvgTinyDocument* doc, QByteArray* arr);
+    virtual ~QSvgImageWriter();
 
-    QChar m_unicode;
-    QPainterPath m_path;
-    qreal m_horizAdvX;
-};
+    void write();
+    QIODevice *device() const;
 
-
-class Q_SVG_PRIVATE_EXPORT QSvgFont : public QSvgRefCounted
-{
-public:
-    QSvgFont(qreal horizAdvX);
-
-    void setFamilyName(const QString &name);
-    QString familyName() const;
-
-    void setUnitsPerEm(qreal upem);
-
-    void addGlyph(QChar unicode, const QPainterPath &path, qreal horizAdvX = -1);
-
-    int textWidth(const QString &str) const;
-    void draw(QPainter *p, const QPointF &point, const QString &str, qreal pixelSize, Qt::Alignment alignment) const;
-public:
-    QString m_familyName;
-    qreal m_unitsPerEm;
-    qreal m_ascent;
-    qreal m_descent;
-    qreal m_horizAdvX;
-    QHash<QChar, QSvgGlyph> m_glyphs;
+private:
+    QScopedPointer<QSvgImageWriterPrivate> d;
 };
 
 QT_END_NAMESPACE
 
-#endif // QSVGFONT_P_H
+#endif // QT_NO_SVG
+#endif // QSVGIMAGEWRITER_H
