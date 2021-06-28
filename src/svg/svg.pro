@@ -11,6 +11,7 @@ QMAKE_DOCS = $$PWD/doc/qtsvg.qdocconf
 HEADERS += \
     qsvggraphics_p.h        \
     qsvghandler_p.h         \
+    qsvgimagewriter.h       \
     qsvgnode_p.h            \
     qsvgstructure_p.h       \
     qsvgstyle_p.h           \
@@ -26,6 +27,7 @@ HEADERS += \
 SOURCES += \
     qsvggraphics.cpp        \
     qsvghandler.cpp         \
+    qsvgimagewriter.cpp     \
     qsvgnode.cpp            \
     qsvgstructure.cpp       \
     qsvgstyle.cpp           \

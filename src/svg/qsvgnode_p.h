@@ -71,6 +71,8 @@ public:
         G,
         DEFS,
         SWITCH,
+        MARKER,
+        CLIPPATH,
         ANIMATION,
         ARC,
         CIRCLE,
@@ -111,8 +113,11 @@ public:
     QSvgNode(QSvgNode *parent=0);
     virtual ~QSvgNode();
     virtual void draw(QPainter *p, QSvgExtraStates &states) =0;
+    virtual QSvgNode *clone(QSvgNode *parent) = 0;
 
     QSvgNode *parent() const;
+    void setParent(QSvgNode *parent);
+
     bool isDescendantOf(const QSvgNode *parent) const;
 
     void appendStyleProperty(QSvgStyleProperty *prop, const QString &id);
@@ -124,9 +129,11 @@ public:
     QSvgTinyDocument *document() const;
 
     virtual Type type() const =0;
-    virtual QRectF bounds(QPainter *p, QSvgExtraStates &states) const;
-    virtual QRectF transformedBounds(QPainter *p, QSvgExtraStates &states) const;
+    virtual QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const;
+    virtual QRectF transformedBounds(QPainter *p, QSvgExtraStates &states,
+                                     bool defaultViewCoord = false) const;
     QRectF transformedBounds() const;
+    QRectF cacheBounds() const;
 
     void setRequiredFeatures(const QStringList &lst);
     const QStringList & requiredFeatures() const;
@@ -149,11 +156,19 @@ public:
     void setDisplayMode(DisplayMode display);
     DisplayMode displayMode() const;
 
+    bool isClipRuleSet() const;
+    void setClipRule(Qt::FillRule clipRule);
+    Qt::FillRule clipRule() const;
+
     QString nodeId() const;
     void setNodeId(const QString &i);
 
     QString xmlClass() const;
     void setXmlClass(const QString &str);
+
+    QSvgStyle &style();
+    const QSvgStyle &style() const;
+
 protected:
     mutable QSvgStyle m_style;
 
@@ -168,11 +183,13 @@ private:
     QStringList m_requiredFonts;
 
     bool        m_visible;
+    bool        m_bClipRuleSet;
 
     QString m_id;
     QString m_class;
 
     DisplayMode m_displayMode;
+    Qt::FillRule m_clipRule;
     mutable QRectF m_cachedBounds;
 
     friend class QSvgTinyDocument;
@@ -181,6 +198,11 @@ private:
 inline QSvgNode *QSvgNode::parent() const
 {
     return m_parent;
+}
+
+inline void QSvgNode::setParent(QSvgNode *parent)
+{
+    m_parent = parent;
 }
 
 inline bool QSvgNode::isVisible() const
@@ -198,6 +220,20 @@ inline QString QSvgNode::xmlClass() const
     return m_class;
 }
 
+inline QSvgStyle &QSvgNode::style()
+{
+    return m_style;
+}
+
+inline const QSvgStyle &QSvgNode::style() const
+{
+    return m_style;
+}
+
+inline QRectF QSvgNode::cacheBounds() const
+{
+    return m_cachedBounds;
+}
 QT_END_NAMESPACE
 
 #endif // QSVGNODE_P_H

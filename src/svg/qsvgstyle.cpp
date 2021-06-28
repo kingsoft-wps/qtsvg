@@ -50,6 +50,7 @@
 #include "qdebug.h"
 #include "qmath.h"
 #include "qnumeric.h"
+#include "qfontdatabase.h"
 
 QT_BEGIN_NAMESPACE
 
@@ -184,6 +185,7 @@ QSvgFontStyle::QSvgFontStyle(QSvgFont *font, QSvgTinyDocument *doc)
     , m_variantSet(0)
     , m_weightSet(0)
     , m_textAnchorSet(0)
+    , m_validFamily(0)
 {
 }
 
@@ -196,6 +198,7 @@ QSvgFontStyle::QSvgFontStyle()
     , m_variantSet(0)
     , m_weightSet(0)
     , m_textAnchorSet(0)
+    , m_validFamily(0)
 {
 }
 
@@ -219,6 +222,12 @@ int QSvgFontStyle::SVGToQtWeight(int weight) {
     return QFont::Normal;
 }
 
+bool QSvgFontStyle::isValidFamily(const QString &family)
+{
+    static const QStringList families = QFontDatabase().families();
+    return families.contains(family, Qt::CaseInsensitive);
+}
+
 void QSvgFontStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &states)
 {
     m_oldQFont = p->font();
@@ -232,7 +241,9 @@ void QSvgFontStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &states
     QFont font = m_oldQFont;
     if (m_familySet) {
         states.svgFont = m_svgFont;
-        font.setFamily(m_qfont.family());
+        if (m_validFamily) {
+            font.setFamily(m_qfont.family());
+        }
     }
 
     if (m_sizeSet)
@@ -287,7 +298,7 @@ QSvgStrokeStyle::QSvgStrokeStyle()
 {
 }
 
-void QSvgStrokeStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &states)
+void QSvgStrokeStyle::apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &states)
 {
     m_oldStroke = p->pen();
     m_oldStrokeOpacity = states.strokeOpacity;
@@ -317,8 +328,18 @@ void QSvgStrokeStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &stat
             pen.setBrush(m_stroke.brush());
     }
 
-    if (m_strokeWidthSet)
-        pen.setWidthF(m_stroke.widthF());
+    if (m_strokeWidthSet) {
+        qreal strokeWidth = m_stroke.widthF();
+
+        if (node->document()->viewBoxValid() && node->cacheBounds().isValid()) {
+            QRectF viewBox = node->document()->viewBox();
+
+            if (viewBox.contains(node->cacheBounds().center()))
+                strokeWidth = qMin(strokeWidth, 2.0 * qMax(viewBox.width(), viewBox.height()));
+        }
+
+        pen.setWidthF(strokeWidth);
+    }
 
     bool setDashOffsetNeeded = false;
 
@@ -351,12 +372,10 @@ void QSvgStrokeStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &stat
         setDashOffsetNeeded = true;
     }
 
-    if (m_strokeLineCapSet)
-        pen.setCapStyle(m_stroke.capStyle());
-    if (m_strokeLineJoinSet)
-        pen.setJoinStyle(m_stroke.joinStyle());
-    if (m_strokeMiterLimitSet)
-        pen.setMiterLimit(m_stroke.miterLimit());
+    // QPen's default-init-value is different from SVG-Standard
+    pen.setCapStyle(m_strokeLineCapSet ? m_stroke.capStyle() : Qt::FlatCap);
+    pen.setJoinStyle(m_strokeLineJoinSet ? m_stroke.joinStyle() : Qt::SvgMiterJoin);
+    pen.setMiterLimit(m_strokeMiterLimitSet ? m_stroke.miterLimit() : 4.0);
 
     // You can have dash offset on solid strokes in SVG files, but not in Qt.
     // QPen::setDashOffset() will set the pen style to Qt::CustomDashLine,
@@ -402,17 +421,13 @@ QSvgSolidColorStyle::QSvgSolidColorStyle(const QColor &color)
 {
 }
 
-QSvgGradientStyle::QSvgGradientStyle(QGradient *grad)
-    : m_gradient(grad), m_gradientStopsSet(false)
+QSvgInnerGradientStyle::QSvgInnerGradientStyle(QGradient *grad)
+    : m_gradient(grad), m_gradientStopsSet(false), m_matrixSet(false)
 {
 }
 
-QBrush QSvgGradientStyle::brush(QPainter *, QSvgExtraStates &)
+QBrush QSvgInnerGradientStyle::brush()
 {
-    if (!m_link.isEmpty()) {
-        resolveStops();
-    }
-
     // If the gradient is marked as empty, insert transparent black
     if (!m_gradientStopsSet) {
         m_gradient->setStops(QGradientStops() << QGradientStop(0.0, QColor(0, 0, 0, 0)));
@@ -427,16 +442,18 @@ QBrush QSvgGradientStyle::brush(QPainter *, QSvgExtraStates &)
     return b;
 }
 
+QBrush QSvgInnerGradientStyle::brush(QPainter *, QSvgExtraStates &)
+{
+    return brush();
+}
 
-void QSvgGradientStyle::setMatrix(const QMatrix &mat)
+void QSvgInnerGradientStyle::setMatrix(const QMatrix &mat)
 {
     m_matrix = mat;
+    m_matrixSet = true;
 }
 
-QSvgTransformStyle::QSvgTransformStyle(const QTransform &trans)
-    : m_transform(trans)
-{
-}
+QSvgTransformStyle::QSvgTransformStyle(const QTransform &trans) : m_transform(trans) {}
 
 void QSvgTransformStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &)
 {
@@ -484,6 +501,11 @@ QSvgStyleProperty::Type QSvgGradientStyle::type() const
     return GRADIENT;
 }
 
+QSvgStyleProperty::Type QSvgInnerGradientStyle::type() const
+{
+    return INNER_GRADIENT;
+}
+
 QSvgStyleProperty::Type QSvgTransformStyle::type() const
 {
     return TRANSFORM;
@@ -510,6 +532,71 @@ void QSvgCompOpStyle::revert(QPainter *p, QSvgExtraStates &)
 QSvgStyleProperty::Type QSvgCompOpStyle::type() const
 {
     return COMP_OP;
+}
+
+QSvgClipPathStyle::QSvgClipPathStyle(const QString &clipId) 
+    : m_clipId(clipId), m_clipNode(nullptr)
+{
+}
+
+void QSvgClipPathStyle::initCurrePath(QRectF bounds)
+{
+    if (nullptr == m_clipNode)
+        return;
+    if (!m_clipNode->isParsed())
+        m_clipNode->parseClipPathList();
+
+    for (const QPainterPath &cPath : m_clipNode->getClipPathList()) {
+        QPainterPath temp;
+        if (QSvgClipPath::objectBoundingBox == m_clipNode->getCoordinateMode()) {
+            QTransform gradientToUser(bounds.width(), 0.0, 0.0, bounds.height(), bounds.x(), bounds.y());
+            temp = gradientToUser.map(cPath);
+        } else {
+            temp = cPath;
+        }
+        m_currePath |= temp;
+    }
+}
+
+void QSvgClipPathStyle::apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &states) 
+{
+    if (nullptr != m_clipNode) 
+    {
+        m_oldPath = p->clipPath();
+        p->setClipPath(m_currePath, Qt::IntersectClip);
+    }
+}
+
+void QSvgClipPathStyle::revert(QPainter *p, QSvgExtraStates &states) 
+{
+    if (nullptr != m_clipNode)
+        p->setClipPath(m_oldPath, Qt::ReplaceClip);
+}
+
+QSvgStyleProperty::Type QSvgClipPathStyle::type() const 
+{
+    return CLIPPATH;
+}
+
+static bool isParentStyle(const QSvgNode *node, const QString &id)
+{
+    QSvgNode *parent = node->parent();
+    if (!parent)
+        return false;
+    if (id == parent->nodeId())
+        return true;
+    return isParentStyle(parent, id);
+}
+
+void QSvgClipPathStyle::setClipPathNode(const QSvgNode *userNode) 
+{
+    if (nullptr == userNode || nullptr == userNode->document()
+        || nullptr == userNode->document()->namedNode(m_clipId)
+        || QSvgNode::CLIPPATH != userNode->document()->namedNode(m_clipId)->type())
+        return;
+
+    if (!isParentStyle(userNode, m_clipId))
+        m_clipNode = static_cast<QSvgClipPath *>(userNode->document()->namedNode(m_clipId));
 }
 
 QSvgStyle::~QSvgStyle()
@@ -578,6 +665,10 @@ void QSvgStyle::apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &states
     if (compop) {
         compop->apply(p, node, states);
     }
+
+    if (clipPath) {
+        clipPath->apply(p, node, states);
+    }
 }
 
 void QSvgStyle::revert(QPainter *p, QSvgExtraStates &states)
@@ -600,6 +691,10 @@ void QSvgStyle::revert(QPainter *p, QSvgExtraStates &states)
 
     if (stroke) {
         stroke->revert(p, states);
+    }
+
+    if (clipPath) {
+        clipPath->revert(p, states);
     }
 
     //animated transforms need to be reverted _before_
@@ -653,7 +748,7 @@ void QSvgAnimateTransform::setArgs(TransformType type, Additive additive, const 
     m_type = type;
     m_args = args;
     m_additive = additive;
-    Q_ASSERT(!(args.count()%3));
+    Q_ASSERT(!(args.count() % 3));
     m_count = args.count() / 3;
 }
 
@@ -964,6 +1059,14 @@ void QSvgGradientStyle::resolveStops_helper(QStringList *visited)
         }
         m_link = QString();
     }
+}
+
+QBrush QSvgGradientStyle::brush(QPainter *, QSvgExtraStates &)
+{
+    if (!m_link.isEmpty()) {
+        resolveStops();
+    }
+    return QSvgInnerGradientStyle::brush();
 }
 
 QT_END_NAMESPACE

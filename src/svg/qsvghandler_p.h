@@ -59,6 +59,7 @@
 #include "private/qcssparser_p.h"
 #include "qsvggraphics_p.h"
 #include "qtsvgglobal_p.h"
+#include <functional>
 
 QT_BEGIN_NAMESPACE
 
@@ -79,6 +80,8 @@ struct QSvgCssAttribute
 
 #endif
 
+using ConvertImageToPixmap = std::function<QPixmap(const QImage &img)>;
+
 class Q_SVG_PRIVATE_EXPORT QSvgHandler
 {
 public:
@@ -94,9 +97,10 @@ public:
     };
 
 public:
-    QSvgHandler(QIODevice *device);
-    QSvgHandler(const QByteArray &data);
-    QSvgHandler(QXmlStreamReader *const data);
+    QSvgHandler(QIODevice *device, ConvertImageToPixmap convertFun);
+    QSvgHandler(const QByteArray &data, ConvertImageToPixmap convertFun);
+    QSvgHandler(QXmlStreamReader *const data, ConvertImageToPixmap convertFun);
+    QSvgHandler(QIODevice *device, const QMap<QString, QMap<QString, QVariant>> &classProperties, ConvertImageToPixmap convertFun);
     ~QSvgHandler();
 
     QIODevice *device() const;
@@ -133,6 +137,11 @@ public:
 
     inline QPen defaultPen() const
     { return m_defaultPen; }
+
+    inline QStringList xmlClasses() const 
+    { return m_xmlClasses; }
+
+    QPixmap convertToPixmap(const QImage &img);
 
 public:
     bool startElement(const QString &localName, const QXmlStreamAttributes &attributes);
@@ -178,8 +187,10 @@ private:
     QCss::Parser m_cssParser;
 #endif
     void parse();
+    void modifyCss(QString &css);
     void resolveGradients(QSvgNode *node, int nestedDepth = 0);
     void resolveNodes();
+    void setClipStyleNode(QSvgNode *node);
 
     QPen m_defaultPen;
     /**
@@ -187,6 +198,12 @@ private:
      * we need to delete it.
      */
     const bool m_ownsReader;
+
+    QStringList m_xmlClasses;
+    typedef QMap<QString, QMap<QString, QVariant>> ClassProperties;
+    ClassProperties m_classProperties;
+
+    ConvertImageToPixmap m_convertToPixmapFun;
 };
 
 Q_DECLARE_LOGGING_CATEGORY(lcSvgHandler)

@@ -48,7 +48,9 @@ QT_BEGIN_NAMESPACE
 QSvgNode::QSvgNode(QSvgNode *parent)
     : m_parent(parent),
       m_visible(true),
-      m_displayMode(BlockMode)
+      m_displayMode(BlockMode), 
+      m_bClipRuleSet(false),
+      m_clipRule(Qt::WindingFill)
 {
 }
 
@@ -116,6 +118,9 @@ void QSvgNode::appendStyleProperty(QSvgStyleProperty *prop, const QString &id)
     case QSvgStyleProperty::COMP_OP:
         m_style.compop = static_cast<QSvgCompOpStyle*>(prop);
         break;
+    case QSvgStyleProperty::CLIPPATH:
+        m_style.clipPath = static_cast<QSvgClipPathStyle*>(prop);
+        break;
     default:
         qDebug("QSvgNode: Trying to append unknown property!");
         break;
@@ -134,6 +139,9 @@ void QSvgNode::revertStyle(QPainter *p, QSvgExtraStates &states) const
 
 QSvgStyleProperty * QSvgNode::styleProperty(QSvgStyleProperty::Type type) const
 {
+    if (QSvgStyleProperty::CLIPPATH == type && this->m_style.clipPath)
+        return this->m_style.clipPath;
+
     const QSvgNode *node = this;
     while (node) {
         switch (type) {
@@ -196,14 +204,11 @@ QSvgStyleProperty * QSvgNode::styleProperty(QSvgStyleProperty::Type type) const
 
 QSvgFillStyleProperty * QSvgNode::styleProperty(const QString &id) const
 {
-    QString rid = id;
-    if (rid.startsWith(QLatin1Char('#')))
-        rid.remove(0, 1);
     QSvgTinyDocument *doc = document();
-    return doc ? doc->namedStyle(rid) : 0;
+    return doc ? doc->namedStyle(id) : 0;
 }
 
-QRectF QSvgNode::bounds(QPainter *, QSvgExtraStates &) const
+QRectF QSvgNode::bounds(QPainter *, QSvgExtraStates &, bool) const
 {
     return QRectF(0, 0, 0, 0);
 }
@@ -233,7 +238,7 @@ QRectF QSvgNode::transformedBounds() const
     
     p.setWorldTransform(QTransform());
 
-    m_cachedBounds = transformedBounds(&p, states);
+    m_cachedBounds = transformedBounds(&p, states, true);
     return m_cachedBounds;
 }
 
@@ -311,11 +316,18 @@ void QSvgNode::setVisible(bool visible)
     m_visible = visible;
 }
 
-QRectF QSvgNode::transformedBounds(QPainter *p, QSvgExtraStates &states) const
+QRectF QSvgNode::transformedBounds(QPainter *p, QSvgExtraStates &states,
+                                   bool defaultViewCoord /*= false*/) const
 {
+    if (defaultViewCoord && m_cachedBounds.isValid())
+        return m_cachedBounds;
+
     applyStyle(p, states);
-    QRectF rect = bounds(p, states);
+    QRectF rect = bounds(p, states, defaultViewCoord);
     revertStyle(p, states);
+
+    if (defaultViewCoord && m_cachedBounds.isEmpty() && rect.isValid())
+        m_cachedBounds = rect;
     return rect;
 }
 
@@ -337,6 +349,22 @@ void QSvgNode::setDisplayMode(DisplayMode mode)
 QSvgNode::DisplayMode QSvgNode::displayMode() const
 {
     return m_displayMode;
+}
+
+bool QSvgNode::isClipRuleSet() const
+{
+    return m_bClipRuleSet;
+}
+
+void QSvgNode::setClipRule(Qt::FillRule clipRule) 
+{
+    m_bClipRuleSet = true;
+    m_clipRule = clipRule;
+}
+
+Qt::FillRule QSvgNode::clipRule() const 
+{
+    return m_clipRule;
 }
 
 qreal QSvgNode::strokeWidth(QPainter *p)

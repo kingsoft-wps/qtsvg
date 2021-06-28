@@ -66,6 +66,7 @@ class QPainter;
 class QSvgNode;
 class QSvgFont;
 class QSvgTinyDocument;
+class QSvgClipPath;
 
 template <class T> class QSvgRefCounter
 {
@@ -159,12 +160,14 @@ public:
         FONT,
         STROKE,
         SOLID_COLOR,
+        INNER_GRADIENT,
         GRADIENT,
         TRANSFORM,
         ANIMATE_TRANSFORM,
         ANIMATE_COLOR,
         OPACITY,
-        COMP_OP
+        COMP_OP,
+        CLIPPATH
     };
 public:
     virtual ~QSvgStyleProperty();
@@ -176,6 +179,7 @@ public:
 class Q_SVG_PRIVATE_EXPORT QSvgFillStyleProperty : public QSvgStyleProperty
 {
 public:
+    virtual QBrush brush() = 0;
     virtual QBrush brush(QPainter *p, QSvgExtraStates &states) = 0;
     void apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &states) override;
     void revert(QPainter *p, QSvgExtraStates &states) override;
@@ -220,6 +224,8 @@ public:
     void apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &states) override;
     void revert(QPainter *p, QSvgExtraStates &states) override;
     Type type() const override;
+    qreal opacity() const { return m_opacity; }
+
 private:
     qreal m_opacity;
     qreal m_oldOpacity;
@@ -278,12 +284,18 @@ public:
         return m_gradientResolved;
     }
 
+    bool isFillRuleSet() const { return m_fillRuleSet; }
+
+    bool isFillOpacitySet() const { return m_fillOpacitySet; }
+
+    bool isFillSet() const { return m_fillSet; }
+
 private:
     // fill            v 	v 	'inherit' | <Paint.datatype>
     // fill-opacity    v 	v 	'inherit' | <OpacityValue.datatype>
     QBrush m_fill;
     QBrush m_oldFill;
-    QSvgFillStyleProperty *m_style;
+    QSvgRefCounter<QSvgFillStyleProperty> m_style;
 
     Qt::FillRule m_fillRule;
     Qt::FillRule m_oldFillRule;
@@ -348,6 +360,8 @@ public:
     {
         m_qfont.setFamily(family);
         m_familySet = 1;
+        if (!m_svgFont)
+            m_validFamily = isValidFamily(family);
     }
 
     void setStyle(QFont::Style fontStyle) {
@@ -378,8 +392,26 @@ public:
     {
         return m_qfont;
     }
+    int weight() const { return m_weight; }
+
+    Qt::Alignment textAnchor() const { return m_textAnchor; }
 
     QSvgTinyDocument *doc() const {return m_doc;}
+
+    bool isFamilySet() const { return m_familySet; }
+
+    bool isSizeSet() const { return m_sizeSet; }
+
+    bool isStyleSet() const { return m_styleSet; }
+
+    bool isVariantSet() const { return m_variantSet; }
+
+    bool isWeightSet() const { return m_weightSet; }
+
+    bool isTextAnchorSet() const { return m_textAnchorSet; }
+
+private:
+    bool isValidFamily(const QString &family);
 
 private:
     QSvgFont *m_svgFont;
@@ -395,6 +427,7 @@ private:
     int m_oldWeight;
 
     uint m_familySet : 1;
+    uint m_validFamily : 1;
     uint m_sizeSet : 1;
     uint m_styleSet : 1;
     uint m_variantSet : 1;
@@ -465,10 +498,10 @@ public:
     {
         m_stroke.setWidthF(width);
         m_strokeWidthSet = 1;
-        Q_ASSERT(!m_strokeDashArraySet); // set width before dash array.
+        //Q_ASSERT(!m_strokeDashArraySet); // set width before dash array.(just when parse).
     }
 
-    qreal width()
+    qreal width() const
     {
         return m_stroke.widthF();
     }
@@ -479,10 +512,16 @@ public:
         m_vectorEffectSet = 1;
     }
 
+    bool vectorEffect() const { return m_vectorEffect; }
+
     QSvgFillStyleProperty* style() const
     {
         return m_style;
     }
+
+    qreal strokeOpacity() const { return m_strokeOpacity; }
+
+    qreal strokeDashOffset() const { return m_strokeDashOffset; }
 
     void setGradientId(const QString &Id)
     {
@@ -509,6 +548,24 @@ public:
         return m_stroke;
     }
 
+    bool isStrokeSet() const { return m_strokeSet; }
+
+    bool isStrokeDashArraySet() const { return m_strokeDashArraySet; }
+
+    bool isStrokeDashOffsetSet() const { return m_strokeDashOffsetSet; }
+
+    bool isStrokeLineCapSet() const { return m_strokeLineCapSet; }
+
+    bool isStrokeLineJoinSet() const { return m_strokeLineJoinSet; }
+
+    bool isStrokeMiterLimitSet() const { return m_strokeMiterLimitSet; }
+
+    bool isStrokeOpacitySet() const { return m_strokeOpacitySet; }
+
+    bool isStrokeWidthSet() const { return m_strokeWidthSet; }
+
+    bool isVectorEffectSet() const { return m_vectorEffectSet; }
+
 private:
     // stroke            v 	v 	'inherit' | <Paint.datatype>
     // stroke-dasharray  v 	v 	'inherit' | <StrokeDashArrayValue.datatype>
@@ -525,7 +582,7 @@ private:
     qreal m_strokeDashOffset;
     qreal m_oldStrokeDashOffset;
 
-    QSvgFillStyleProperty *m_style;
+    QSvgRefCounter<QSvgFillStyleProperty> m_style;
     QString m_gradientId;
     uint m_gradientResolved : 1;
     uint m_vectorEffect : 1;
@@ -558,6 +615,8 @@ public:
         return m_solidColor;
     }
 
+    QBrush brush() override { return m_solidColor; }
+
 private:
     // solid-color       v 	x 	'inherit' | <SVGColor.datatype>
     // solid-opacity     v 	x 	'inherit' | <OpacityValue.datatype>
@@ -567,17 +626,12 @@ private:
     QPen   m_oldStroke;
 };
 
-class Q_SVG_PRIVATE_EXPORT QSvgGradientStyle : public QSvgFillStyleProperty
+class Q_SVG_PRIVATE_EXPORT QSvgInnerGradientStyle : public QSvgFillStyleProperty
 {
 public:
-    QSvgGradientStyle(QGradient *grad);
-    ~QSvgGradientStyle() { delete m_gradient; }
+    QSvgInnerGradientStyle(QGradient *grad);
+    virtual ~QSvgInnerGradientStyle() {}
     Type type() const override;
-
-    void setStopLink(const QString &link, QSvgTinyDocument *doc);
-    QString stopLink() const { return m_link; }
-    void resolveStops();
-    void resolveStops_helper(QStringList *visited);
 
     void setMatrix(const QMatrix &matrix);
     QMatrix  qmatrix() const
@@ -600,14 +654,36 @@ public:
         m_gradientStopsSet = set;
     }
 
+    QBrush brush() override;
     QBrush brush(QPainter *, QSvgExtraStates &) override;
-private:
+
+    bool matrixSet() const { return m_matrixSet; }
+
+protected:
     QGradient      *m_gradient;
     QMatrix m_matrix;
 
-    QSvgTinyDocument *m_doc;
-    QString           m_link;
     bool m_gradientStopsSet;
+    bool m_matrixSet;
+};
+
+class Q_SVG_PRIVATE_EXPORT QSvgGradientStyle : public QSvgInnerGradientStyle
+{
+public:
+    QSvgGradientStyle(QGradient *grad) : QSvgInnerGradientStyle(grad), m_doc(nullptr) {}
+    ~QSvgGradientStyle() { delete m_gradient; }
+
+    virtual Type type() const override;
+    void setStopLink(const QString &link, QSvgTinyDocument *doc);
+    QString stopLink() const { return m_link; }
+    void resolveStops();
+    void resolveStops_helper(QStringList *visited);
+
+    QBrush brush(QPainter *, QSvgExtraStates &) override;
+
+private:
+    QSvgTinyDocument *m_doc;
+    QString m_link;
 };
 
 class Q_SVG_PRIVATE_EXPORT QSvgTransformStyle : public QSvgStyleProperty
@@ -744,6 +820,27 @@ private:
     QPainter::CompositionMode m_oldMode;
 };
 
+class Q_SVG_PRIVATE_EXPORT QSvgClipPathStyle : public QSvgStyleProperty
+{
+public:
+    QSvgClipPathStyle(const QString &clipId);
+    void apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &states) override;
+    void revert(QPainter *p, QSvgExtraStates &states) override;
+    Type type() const override;
+
+    const QString& clipPathId() const { return m_clipId; }
+    void setClipPathNode(const QSvgNode *userNode);
+    const QSvgClipPath *getClipNode() const { return m_clipNode; }
+
+    void initCurrePath(QRectF bounds);
+    const QPainterPath& getCurrePath() const { return m_currePath; }
+
+private:
+    QSvgClipPath *m_clipNode;
+    QPainterPath m_oldPath;
+    QPainterPath m_currePath;
+    QString m_clipId;
+};
 
 class Q_SVG_PRIVATE_EXPORT QSvgStyle
 {
@@ -759,7 +856,8 @@ public:
           transform(0),
           animateColor(0),
           opacity(0),
-          compop(0)
+          compop(0),
+          clipPath(0)
     {}
     ~QSvgStyle();
 
@@ -777,6 +875,7 @@ public:
     QList<QSvgRefCounter<QSvgAnimateTransform> >   animateTransforms;
     QSvgRefCounter<QSvgOpacityStyle>      opacity;
     QSvgRefCounter<QSvgCompOpStyle>       compop;
+    QSvgRefCounter<QSvgClipPathStyle>     clipPath;
 };
 
 /********************************************************/

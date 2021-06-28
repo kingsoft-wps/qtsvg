@@ -42,6 +42,7 @@
 #include "qsvgnode_p.h"
 #include "qsvgstyle_p.h"
 #include "qsvgtinydocument_p.h"
+#include "qsvggraphics_p.h"
 
 #include "qpainter.h"
 #include "qlocale.h"
@@ -51,11 +52,7 @@
 
 QT_BEGIN_NAMESPACE
 
-QSvgG::QSvgG(QSvgNode *parent)
-    : QSvgStructureNode(parent)
-{
-
-}
+QSvgG::QSvgG(QSvgNode *parent) : QSvgStructureNode(parent) {}
 
 QSvgStructureNode::~QSvgStructureNode()
 {
@@ -76,15 +73,31 @@ void QSvgG::draw(QPainter *p, QSvgExtraStates &states)
     revertStyle(p, states);
 }
 
+QSvgNode *QSvgG::clone(QSvgNode *parent)
+{
+    QSvgNode *newNode = new QSvgG(*this);
+    newNode->setParent(parent);
+    return newNode;
+}
+
 QSvgNode::Type QSvgG::type() const
 {
     return G;
 }
 
-QSvgStructureNode::QSvgStructureNode(QSvgNode *parent)
-    :QSvgNode(parent)
-{
+QSvgStructureNode::QSvgStructureNode(QSvgNode *parent) : QSvgNode(parent) {}
 
+QSvgStructureNode::QSvgStructureNode(const QSvgStructureNode &other) : QSvgNode(other)
+{
+    // m_renderers
+    m_renderers.reserve(other.m_renderers.size());
+    for (QSvgNode *node : other.m_renderers)
+        m_renderers.append((node)->clone(this));
+
+    // m_scope
+    Q_ASSERT(m_scope.isEmpty());
+    // m_linkedScopes
+    Q_ASSERT(m_linkedScopes.isEmpty());
 }
 
 QSvgNode * QSvgStructureNode::scopeNode(const QString &id) const
@@ -105,14 +118,18 @@ void QSvgStructureNode::addChild(QSvgNode *child, const QString &id)
         doc->addNamedNode(id, child);
 }
 
-QSvgDefs::QSvgDefs(QSvgNode *parent)
-    : QSvgStructureNode(parent)
-{
-}
+QSvgDefs::QSvgDefs(QSvgNode *parent) : QSvgStructureNode(parent) {}
 
 void QSvgDefs::draw(QPainter *, QSvgExtraStates &)
 {
-    //noop
+    // noop
+}
+
+QSvgNode *QSvgDefs::clone(QSvgNode *parent)
+{
+    QSvgDefs *newNode = new QSvgDefs(*this);
+    newNode->setParent(parent);
+    return newNode;
 }
 
 QSvgNode::Type QSvgDefs::type() const
@@ -271,9 +288,12 @@ static inline bool isSupportedSvgExtension(const QString &)
     return false;
 }
 
+QSvgSwitch::QSvgSwitch(QSvgNode *parent) : QSvgStructureNode(parent)
+{
+    init();
+}
 
-QSvgSwitch::QSvgSwitch(QSvgNode *parent)
-    : QSvgStructureNode(parent)
+QSvgSwitch::QSvgSwitch(const QSvgSwitch &other) : QSvgStructureNode(other)
 {
     init();
 }
@@ -342,6 +362,13 @@ void QSvgSwitch::draw(QPainter *p, QSvgExtraStates &states)
     revertStyle(p, states);
 }
 
+QSvgNode *QSvgSwitch::clone(QSvgNode *parent)
+{
+    QSvgSwitch *newNode = new QSvgSwitch(*this);
+    newNode->setParent(parent);
+    return newNode;
+}
+
 QSvgNode::Type QSvgSwitch::type() const
 {
     return SWITCH;
@@ -355,13 +382,13 @@ void QSvgSwitch::init()
     m_systemLanguagePrefix = m_systemLanguage.mid(0, idx);
 }
 
-QRectF QSvgStructureNode::bounds(QPainter *p, QSvgExtraStates &states) const
+QRectF QSvgStructureNode::bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const
 {
     QRectF bounds;
     if (!m_recursing) {
         QScopedValueRollback<bool> guard(m_recursing, true);
         for (QSvgNode *node : qAsConst(m_renderers))
-            bounds |= node->transformedBounds(p, states);
+            bounds |= node->transformedBounds(p, states, defaultViewCoord);
     }
     return bounds;
 }
@@ -377,6 +404,227 @@ QSvgNode * QSvgStructureNode::previousSiblingNode(QSvgNode *n) const
         prev = node;
     }
     return prev;
+}
+
+QSvgMarker::QSvgMarker(QSvgNode *parent) 
+    : QSvgStructureNode(parent), 
+      m_unitsMode(strokeWidth), 
+      m_bAutoOrient(false), 
+      m_orientAngle(0.0)
+{
+}
+
+void QSvgMarker::draw(QPainter *p, QSvgExtraStates &states) {}
+
+void QSvgMarker::draw(QPainter *p, QSvgExtraStates &states, const QPointF& point, qreal angle,
+                      qreal strokeWidth)
+{
+    if (MarkerUnits::userSpaceOnUse == unitsMode())
+        strokeWidth = 1.0;
+    if (!isAutoOrient())
+        angle = m_orientAngle;
+
+    p->save();
+
+    qreal scale = 0.0;
+    if (m_viewBox.height() && m_viewBox.width())
+        scale = qMin(m_size.height() / m_viewBox.height(), m_size.width() / m_viewBox.width());
+   
+    p->translate(point);
+    p->rotate(angle);
+    p->scale(strokeWidth, strokeWidth);
+    p->translate(-m_ref.x() * scale, -m_ref.y() * scale);
+    p->scale(scale, scale);
+    p->setClipRect(m_viewBox, Qt::IntersectClip);
+
+    auto itr = m_renderers.cbegin();
+    applyStyle(p, states);
+    while (itr != m_renderers.cend()) {
+        QSvgNode *node = *itr;
+        if ((node->isVisible()) && (QSvgNode::NoneMode != node->displayMode()))
+            node->draw(p, states);
+        ++itr;
+    }
+    revertStyle(p, states);
+    p->restore();
+}
+
+QSvgNode *QSvgMarker::clone(QSvgNode *parent)
+{
+    QSvgNode *newNode = new QSvgMarker(*this);
+    newNode->setParent(parent);
+    return newNode;
+}
+
+QSvgNode::Type QSvgMarker::type() const
+{
+    return QSvgNode::MARKER;
+}
+
+bool QSvgMarker::viewBoxValid() const
+{
+    return m_viewBox.isValid();
+}
+
+const QRectF& QSvgMarker::viewBox() const
+{
+    if (m_viewBox.isNull())
+        m_viewBox = transformedBounds();
+
+    return m_viewBox;
+}
+
+void QSvgMarker::setOrientAngle(qreal angle)
+{
+    Q_ASSERT(!m_bAutoOrient);
+    m_orientAngle = angle;
+}
+
+QSvgClipPath::QSvgClipPath(QSvgNode *parent) 
+    : QSvgStructureNode(parent), 
+      m_coordinateMode(userSpaceOnUse), 
+      m_bParsed(false)
+{
+}
+
+void QSvgClipPath::draw(QPainter *p, QSvgExtraStates &states) {}
+
+QSvgNode *QSvgClipPath::clone(QSvgNode *parent)
+{
+    QSvgNode *newNode = new QSvgClipPath(*this);
+    newNode->setParent(parent);
+    return newNode;
+}
+
+QSvgNode::Type QSvgClipPath::type() const
+{
+    return QSvgNode::CLIPPATH;
+}
+
+static void addTextPath(QSvgText *pText, QPainterPath &clipPath)
+{
+    for (const QSvgTspan *tspan : pText->tspans()) {
+        const QSvgText *toParent = static_cast<const QSvgText *>(tspan->parent());
+        QSvgFontStyle *pFontStyle =
+                static_cast<QSvgFontStyle *>(tspan->styleProperty(QSvgStyleProperty::FONT));
+
+        QFont font = pFontStyle->qfont();
+        font.setPixelSize(font.pointSizeF());
+        font.setPointSizeF(-1);
+        clipPath.addText(toParent->coord(), font, tspan->text());
+    }
+}
+
+void QSvgClipPath::parseClipPathList() 
+{
+    m_pathList.clear();
+    QSvgTransformStyle *pTransformStyle =
+            static_cast<QSvgTransformStyle *>(styleProperty(QSvgStyleProperty::TRANSFORM));
+    QSvgClipPathStyle *curClipStyle =
+            static_cast<QSvgClipPathStyle *>(styleProperty(QSvgStyleProperty::CLIPPATH));
+
+    auto parseNodePath = [&](QSvgNode *node, QPainterPath& path) {
+        if (!(node->isVisible()) || QSvgNode::NoneMode == node->displayMode())
+            return;
+
+        QPainterPath nodePath;
+        switch (node->type()) {
+        case QSvgNode::RECT: {
+            QSvgRect *pRect = static_cast<QSvgRect*>(node);
+            nodePath.addRect(pRect->rect());
+        } break;
+        case QSvgNode::ELLIPSE:
+        case QSvgNode::CIRCLE: {
+            QSvgEllipse *pEllipse = static_cast<QSvgEllipse*>(node);
+            nodePath.addEllipse(pEllipse->bounds());
+        } break;
+        case QSvgNode::PATH: {
+            QSvgPath *pPath = static_cast<QSvgPath*>(node);
+            nodePath.addPath(pPath->path());
+        } break;
+        case QSvgNode::POLYGON: {
+            QSvgPolygon *pPolygon = static_cast<QSvgPolygon*>(node);
+            nodePath.addPolygon(pPolygon->poly());
+        } break;
+        case QSvgNode::TEXT: {
+            QSvgText *pText = static_cast<QSvgText *>(node);
+            addTextPath(pText, nodePath);
+        } break;
+        default:
+            return;
+        break;
+        };
+
+        QSvgClipPathStyle *clipStyle =
+                static_cast<QSvgClipPathStyle *>(node->styleProperty(QSvgStyleProperty::CLIPPATH));
+
+        if (clipStyle && clipStyle->getClipNode()) {
+            clipStyle->initCurrePath(node->transformedBounds());
+            nodePath &= clipStyle->getCurrePath();
+        }
+        if (curClipStyle && curClipStyle->getClipNode()) {
+            curClipStyle->initCurrePath(transformedBounds());
+            nodePath &= curClipStyle->getCurrePath();
+        }
+        if (pTransformStyle)
+            nodePath = pTransformStyle->qtransform().map(nodePath);
+        path = nodePath;
+    };
+
+    auto parseUsePath = [&](QSvgUse *use, QPainterPath &path) { 
+        QPainterPath tempPath;
+        if (nullptr == use || nullptr == use->document())
+            return;
+
+        QSvgNode *link = use->document()->namedNode(use->linkId());
+        if (nullptr == link)
+            return;
+
+        if (QSvgNode::DOC == link->type() 
+            || QSvgNode::G == link->type()
+            || QSvgNode::SWITCH == link->type()) {
+            QSvgStructureNode *group = static_cast<QSvgStructureNode *>(link);
+            for (QSvgNode *node : group->renderers()) {
+                QPainterPath gPath;
+                parseNodePath(node, gPath);
+                tempPath |= gPath;
+            }
+        } else {
+            parseNodePath(link, tempPath);
+        }
+
+        QTransform trans;
+        trans.translate(use->start().x(), use->start().y());
+        path = trans.map(tempPath);
+    };
+
+    auto itr = m_renderers.cbegin(); 
+    while (itr != m_renderers.cend()) {
+        QSvgNode* node = *itr;
+        QPainterPath curPath;
+        if (QSvgNode::USE == node->type()) {
+            QSvgUse *use = static_cast<QSvgUse *>(node);
+            parseUsePath(use, curPath);
+        }
+        else{
+            parseNodePath(node, curPath);
+        }
+
+        QSvgTransformStyle *curTransformStyle =
+                static_cast<QSvgTransformStyle *>(node->styleProperty(QSvgStyleProperty::TRANSFORM));
+        if (curTransformStyle != pTransformStyle)
+            curPath = curTransformStyle->qtransform().map(curPath);
+
+        if (node->isClipRuleSet())
+            curPath.setFillRule(node->clipRule());
+        else
+            curPath.setFillRule(clipRule());
+
+        m_pathList.push_back(curPath);
+        ++itr;
+    }
+
+    m_bParsed = true;
 }
 
 QT_END_NAMESPACE

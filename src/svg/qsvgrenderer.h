@@ -91,10 +91,13 @@ public:
     bool elementExists(const QString &id) const;
     QMatrix matrixForElement(const QString &id) const;
 
+    QStringList xmlClassList();
 public Q_SLOTS:
     bool load(const QString &filename);
     bool load(const QByteArray &contents);
     bool load(QXmlStreamReader *contents);
+    bool load(const QString &filename,
+              const QMap<QString, QMap<QString, QVariant>> &classProperties);
     void render(QPainter *p);
     void render(QPainter *p, const QRectF &bounds);
 
