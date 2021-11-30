@@ -196,6 +196,10 @@ QSvgStyleProperty * QSvgNode::styleProperty(QSvgStyleProperty::Type type) const
         default:
             break;
         }
+
+        QSvgNode::Type nodeType = node->type();
+        if (DEFS == nodeType || CLIPPATH == nodeType)
+            break;
         node = node->parent();
     }
 
