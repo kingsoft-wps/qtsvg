@@ -764,7 +764,7 @@ void QSvgText::processTspansCoords(QSvgTspan *tspan,
     const bool bStartSpace = (newText.startsWith(QChar(0x20)) || newText.startsWith(QChar(0xa0)));
     const bool bEndSpace = (newText.endsWith(QChar(0x20)) || newText.endsWith(QChar(0xa0)));
 
-    if (m_mode == QSvgText::Default) {
+    if (tspan->whitespaceMode() == QSvgText::Default) {
         newText = newText.simplified();
         if (bStartSpace && !m_paragraphs.empty() && !m_paragraphs.last().endsWith(QChar(' ')))
             newText.prepend(QLatin1Char(' '));
