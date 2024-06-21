@@ -313,7 +313,7 @@ static bool loadDocument(QSvgRenderer *const q,
                          const TInputType &in)
 {
     delete d->render;
-    d->render = QSvgTinyDocument::load(in, nullptr);
+    d->render = QSvgTinyDocument::load(in);
     if (d->render && !d->render->size().isValid()) {
         delete d->render;
         d->render = nullptr;
@@ -341,7 +341,11 @@ static bool loadDocument(QSvgRenderer *const q, QSvgRendererPrivate *const d, co
                          const QMap<QString, QMap<QString, QVariant>> classProperties)
 {
     delete d->render;
-    d->render = QSvgTinyDocument::load(in, classProperties, nullptr);
+    d->render = QSvgTinyDocument::load(in, classProperties);
+    if (d->render && !d->render->size().isValid()) {
+        delete d->render;
+        d->render = nullptr;
+    }
     if (d->render && d->render->animated() && d->fps > 0) {
         if (!d->timer)
             d->timer = new QTimer(q);

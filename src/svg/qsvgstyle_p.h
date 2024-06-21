@@ -274,6 +274,16 @@ public:
         return m_gradientId;
     }
 
+    void setPatternId(const QString &Id)
+    {
+        m_patternId = Id;
+    }
+
+    QString patternId() const
+    {
+        return m_patternId;
+    }
+
     void setGradientResolved(bool resolved)
     {
         m_gradientResolved = resolved;
@@ -302,6 +312,7 @@ private:
     qreal m_fillOpacity;
     qreal m_oldFillOpacity;
 
+    QString m_patternId;
     QString m_gradientId;
     uint m_gradientResolved : 1;
 

@@ -159,6 +159,41 @@ private:
     QSize m_size;
 };
 
+class Q_SVG_PRIVATE_EXPORT QSvgPattern : public QSvgStructureNode
+{
+public:
+    enum PatternUnits
+    {
+        objectBoundingBox,
+        userSpaceOnUse
+    };
+
+    QSvgPattern(QSvgNode *parent, const QRectF &bounds, PatternUnits units, PatternUnits contentUnits);
+    void draw(QPainter *p, QSvgExtraStates &states) override;
+    void drawTile(QPainter *p, QSvgExtraStates &states);
+    QRectF rect4DrawTile(qreal fPatternX, qreal fPatternY);
+    QPixmap patternContentPixmap(QPainter *p, QSvgExtraStates &states);
+    QSvgNode *clone(QSvgNode *parent) override;
+    Type type() const override;
+    void setClipPath(const QPainterPath &path);
+
+    const PatternUnits &patternContentUnits() const { return m_patternContentUnits; }
+    const PatternUnits &patternUnits() const { return m_patternUnits; }
+
+    const QRectF &viewBox() const { return m_viewBox; }
+    void setViewBox(const QRectF &rect) { m_viewBox = rect; }
+
+    const QRectF &bounds() const { return m_bounds; }
+    const QRectF &ratioBounds() const { return m_ratioBounds; }
+private:
+    QRectF m_bounds;
+    QRectF m_ratioBounds;
+    QRectF m_viewBox;
+    QPainterPath m_clipPath;
+    PatternUnits m_patternUnits;
+    PatternUnits m_patternContentUnits;
+};
+
 class Q_SVG_PRIVATE_EXPORT QSvgClipPath : public QSvgStructureNode
 {
 public:

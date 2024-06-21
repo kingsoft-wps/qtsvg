@@ -306,6 +306,28 @@ static void resolveCoordAndOffset(const QVector<qreal> &coordX, const QVector<qr
     }
 }
 
+static void drawPatternNode(QSvgPattern *pattern, QPainter *painter, const QPainterPath &path,
+                            const QRectF &targetBounds, QSvgExtraStates &states)
+{
+    if (pattern) {
+        pattern->setClipPath(path);
+        pattern->setTargetBounds(targetBounds);
+        pattern->drawTile(painter, states);
+    }
+}
+
+static bool isRatioChildInPattern(QSvgNode *curNode)
+{
+    bool need = false;
+    if (curNode && curNode->parent() && (curNode->parent()->type() == QSvgNode::PATTERN)) {
+        QSvgPattern *pattern = static_cast<QSvgPattern*>(curNode->parent());
+        if (pattern && (pattern->patternContentUnits() == QSvgPattern::objectBoundingBox)
+                && (!curNode->targetBounds().isNull()))
+            need = true;
+    }
+    return need;
+}
+
 void QSvgLine::setMarker(const QString& sId, const QString& mId, const QString& eId)
 {
     parseMarkerId(this, m_markerLink, sId, mId, eId);
@@ -362,7 +384,7 @@ static inline QRectF boundsOnStroke(QPainter *p, const QPainterPath &path, qreal
 }
 
 QSvgEllipse::QSvgEllipse(QSvgNode *parent, const QRectF &rect)
-    : QSvgNode(parent), m_bounds(rect)
+    : QSvgNode(parent), m_bounds(rect), m_fillPattern(nullptr)
 {
 }
 
@@ -375,11 +397,44 @@ QRectF QSvgEllipse::bounds(QPainter *p, QSvgExtraStates &, bool) const
     return qFuzzyIsNull(sw) ? p->transform().map(path).boundingRect() : boundsOnStroke(p, path, sw);
 }
 
+QSvgNode *QSvgEllipse::getFillPattern()
+{
+    return m_fillPattern;
+}
+
+void QSvgEllipse::updateFillPattern(QSvgNode* fillPattern)
+{
+    Q_ASSERT(!fillPattern || fillPattern->type() == QSvgNode::PATTERN);
+    m_fillPattern = static_cast<QSvgPattern*>(fillPattern);
+}
+
 void QSvgEllipse::draw(QPainter *p, QSvgExtraStates &states)
 {
     applyStyle(p, states);
+
+    bool isRatioInPattern = isRatioChildInPattern(this);
+    if (isRatioInPattern)
+        p->scale(m_targetBounds.width(), m_targetBounds.height());
+
+    QBrush _oldBrush = p->brush();
+    if (m_fillPattern)
+        p->setBrush(Qt::NoBrush);
+
     QT_SVG_DRAW_SHAPE(p->drawEllipse(m_bounds));
+
+    if (isRatioInPattern)
+        p->scale((1.0 / m_targetBounds.width()), (1.0 / m_targetBounds.height()));
+
+    if (m_fillPattern)
+        p->setBrush(_oldBrush);
+
     revertStyle(p, states);
+
+    if (m_fillPattern) {
+        QPainterPath path;
+        path.addEllipse(m_bounds);
+        drawPatternNode(m_fillPattern, p, path, m_bounds, states);
+    }
 }
 
 QSvgArc::QSvgArc(QSvgNode *parent, const QPainterPath &path)
@@ -399,7 +454,7 @@ void QSvgArc::draw(QPainter *p, QSvgExtraStates &states)
     revertStyle(p, states);
 }
 
-QSvgImage::QSvgImage(QSvgNode *parent, const QPixmap &image,
+QSvgImage::QSvgImage(QSvgNode *parent, const QImage &image,
                      const QRectF &bounds)
     : QSvgNode(parent), m_image(image),
       m_bounds(bounds)
@@ -413,17 +468,30 @@ QSvgImage::QSvgImage(QSvgNode *parent, const QPixmap &image,
 void QSvgImage::draw(QPainter *p, QSvgExtraStates &states)
 {
     applyStyle(p, states);
+
     qreal oldOpacity = p->opacity();
     p->setOpacity(oldOpacity * states.fillOpacity);
+
+    bool isRatioInPattern = isRatioChildInPattern(this);
+    if (isRatioInPattern)
+        p->scale(m_targetBounds.width(), m_targetBounds.height());
 
 #ifndef QT_NO_EXCEPTIONS
     try {
 #endif
-        p->drawPixmap(m_bounds, m_image, QRectF(0, 0, m_image.width(), m_image.height()));
+        if (auto tinydoc = document()) {
+            const QPixmap &pixmap = tinydoc->convertToPixmap(p, m_image);
+            p->drawPixmap(m_bounds, pixmap, QRectF(0, 0, m_image.width(), m_image.height()));
+        } else {
+            p->drawImage(m_bounds, m_image);
+        }
 #ifndef QT_NO_EXCEPTIONS
     } catch (const std::exception &) {
     }
 #endif
+
+    if (isRatioInPattern)
+        p->scale((1.0 / m_targetBounds.width()), (1.0 / m_targetBounds.height()));
 
     p->setOpacity(oldOpacity);
     revertStyle(p, states);
@@ -439,12 +507,21 @@ QSvgLine::QSvgLine(QSvgNode *parent, const QLineF &line)
 void QSvgLine::draw(QPainter *p, QSvgExtraStates &states)
 {
     applyStyle(p, states);
+
+    bool isRatioInPattern = isRatioChildInPattern(this);
+    if (isRatioInPattern)
+        p->scale(m_targetBounds.width(), m_targetBounds.height());
+
     if (p->pen().widthF() != 0) {
         qreal oldOpacity = p->opacity();
         p->setOpacity(oldOpacity * states.strokeOpacity);
         p->drawLine(m_line);
         p->setOpacity(oldOpacity);
     }
+
+    if (isRatioInPattern)
+        p->scale((1.0 / m_targetBounds.width()), (1.0 / m_targetBounds.height()));
+
     revertStyle(p, states);
 
     parseMarkerUse(m_markerLink, document());
@@ -467,7 +544,7 @@ void QSvgLine::updateMarker()
 }
 
 QSvgPath::QSvgPath(QSvgNode *parent, const QPainterPath &qpath)
-    : QSvgNode(parent), m_path(qpath)
+    : QSvgNode(parent), m_path(qpath), m_fillPattern(nullptr)
 {
 }
 
@@ -475,18 +552,51 @@ void QSvgPath::draw(QPainter *p, QSvgExtraStates &states)
 {
     applyStyle(p, states);
     m_path.setFillRule(states.fillRule);
+
+    bool isRatioInPattern = isRatioChildInPattern(this);
+    if (isRatioInPattern)
+        p->scale(m_targetBounds.width(), m_targetBounds.height());
+
+    QBrush _oldBrush = p->brush();
+    if (m_fillPattern)
+        p->setBrush(Qt::NoBrush);
+
     QT_SVG_DRAW_SHAPE(p->drawPath(m_path));
+
+    if (isRatioInPattern)
+        p->scale((1.0 / m_targetBounds.width()), (1.0 / m_targetBounds.height()));
+
+    if (m_fillPattern)
+        p->setBrush(_oldBrush);
+
     revertStyle(p, states);
 
     parseMarkerUse(m_markerLink, document());
     m_markerLink.strokeWidth = getstrokeWidth(this);
     m_markerLink.drawMarker(p, states);
+
+    if (m_fillPattern) {
+        bool isDot = (m_path.elementCount() <= 1);
+        if (!isDot)
+            drawPatternNode(m_fillPattern, p, m_path, m_path.boundingRect(), states);
+    }
 }
 
 void QSvgPath::updateMarker()
 {
     m_markerLink.apexAngle.clear();
     parsePathData(m_path, m_markerLink.apexAngle);
+}
+
+QSvgNode *QSvgPath::getFillPattern()
+{
+    return m_fillPattern;
+}
+
+void QSvgPath::updateFillPattern(QSvgNode* fillPattern)
+{
+    Q_ASSERT(!fillPattern || fillPattern->type() == QSvgNode::PATTERN);
+    m_fillPattern = static_cast<QSvgPattern *>(fillPattern);
 }
 
 QRectF QSvgPath::bounds(QPainter *p, QSvgExtraStates &, bool) const
@@ -497,7 +607,7 @@ QRectF QSvgPath::bounds(QPainter *p, QSvgExtraStates &, bool) const
 }
 
 QSvgPolygon::QSvgPolygon(QSvgNode *parent, const QPolygonF &poly)
-    : QSvgNode(parent), m_poly(poly)
+    : QSvgNode(parent), m_poly(poly), m_fillPattern(nullptr)
 {
 }
 
@@ -513,15 +623,48 @@ QRectF QSvgPolygon::bounds(QPainter *p, QSvgExtraStates &, bool) const
     }
 }
 
+QSvgNode *QSvgPolygon::getFillPattern()
+{
+    return m_fillPattern;
+}
+
+void QSvgPolygon::updateFillPattern(QSvgNode* fillPattern)
+{
+    Q_ASSERT(!fillPattern || fillPattern->type() == QSvgNode::PATTERN);
+    m_fillPattern = static_cast<QSvgPattern *>(fillPattern);
+}
+
 void QSvgPolygon::draw(QPainter *p, QSvgExtraStates &states)
 {
     applyStyle(p, states);
+
+    bool isRatioInPattern = isRatioChildInPattern(this);
+    if (isRatioInPattern)
+        p->scale(m_targetBounds.width(), m_targetBounds.height());
+
+    QBrush _oldBrush = p->brush();
+    if (m_fillPattern)
+        p->setBrush(Qt::NoBrush);
+
     QT_SVG_DRAW_SHAPE(p->drawPolygon(m_poly, states.fillRule));
+
+    if (isRatioInPattern)
+        p->scale((1.0 / m_targetBounds.width()), (1.0 / m_targetBounds.height()));
+
+    if (m_fillPattern)
+        p->setBrush(_oldBrush);
+
     revertStyle(p, states);
 
     parseMarkerUse(m_markerLink, document());
     m_markerLink.strokeWidth = getstrokeWidth(this);
     m_markerLink.drawMarker(p, states);
+
+    if (m_fillPattern) {
+        QPainterPath path;
+        path.addPolygon(m_poly);
+        drawPatternNode(m_fillPattern, p, path, m_poly.boundingRect(), states);
+    }
 }
 
 void QSvgPolygon::updateMarker()
@@ -531,7 +674,7 @@ void QSvgPolygon::updateMarker()
 }
 
 QSvgPolyline::QSvgPolyline(QSvgNode *parent, const QPolygonF &poly)
-    : QSvgNode(parent), m_poly(poly)
+    : QSvgNode(parent), m_poly(poly), m_fillPattern(nullptr)
 {
 
 }
@@ -539,6 +682,15 @@ QSvgPolyline::QSvgPolyline(QSvgNode *parent, const QPolygonF &poly)
 void QSvgPolyline::draw(QPainter *p, QSvgExtraStates &states)
 {
     applyStyle(p, states);
+
+    bool isRatioInPattern = isRatioChildInPattern(this);
+    if (isRatioInPattern)
+        p->scale(m_targetBounds.width(), m_targetBounds.height());
+
+    QBrush _oldBrush = p->brush();
+    if (m_fillPattern)
+        p->setBrush(Qt::NoBrush);
+
     qreal oldOpacity = p->opacity();
     if (p->brush().style() != Qt::NoBrush) {
         QPen save = p->pen();
@@ -552,11 +704,35 @@ void QSvgPolyline::draw(QPainter *p, QSvgExtraStates &states)
         p->drawPolyline(m_poly);
     }
     p->setOpacity(oldOpacity);
+
+    if (isRatioInPattern)
+        p->scale((1.0 / m_targetBounds.width()), (1.0 / m_targetBounds.height()));
+
+    if (m_fillPattern)
+        p->setBrush(_oldBrush);
+
     revertStyle(p, states);
 
     parseMarkerUse(m_markerLink, document());
     m_markerLink.strokeWidth = getstrokeWidth(this);
     m_markerLink.drawMarker(p, states);
+
+    if (m_fillPattern) {
+        QPainterPath path;
+        path.addPolygon(m_poly);
+        drawPatternNode(m_fillPattern, p, path, m_poly.boundingRect(), states);
+    }
+}
+
+QSvgNode *QSvgPolyline::getFillPattern()
+{
+    return m_fillPattern;
+}
+
+void QSvgPolyline::updateFillPattern(QSvgNode* fillPattern)
+{
+    Q_ASSERT(!fillPattern || fillPattern->type() == QSvgNode::PATTERN);
+    m_fillPattern = static_cast<QSvgPattern *>(fillPattern);
 }
 
 void QSvgPolyline::updateMarker()
@@ -567,7 +743,7 @@ void QSvgPolyline::updateMarker()
 
 QSvgRect::QSvgRect(QSvgNode *node, const QRectF &rect, int rx, int ry)
     : QSvgNode(node),
-      m_rect(rect), m_rx(rx), m_ry(ry)
+      m_rect(rect), m_rx(rx), m_ry(ry), m_fillPattern(nullptr)
 {
 }
 
@@ -583,15 +759,48 @@ QRectF QSvgRect::bounds(QPainter *p, QSvgExtraStates &, bool) const
     }
 }
 
+QSvgNode *QSvgRect::getFillPattern()
+{
+    return m_fillPattern;
+}
+
+void QSvgRect::updateFillPattern(QSvgNode* fillPattern)
+{
+    Q_ASSERT(!fillPattern || fillPattern->type() == QSvgNode::PATTERN);
+    m_fillPattern = static_cast<QSvgPattern *>(fillPattern);
+}
+
 void QSvgRect::draw(QPainter *p, QSvgExtraStates &states)
 {
     applyStyle(p, states);
+
+    bool isRatioInPattern = isRatioChildInPattern(this);
+    if (isRatioInPattern)
+        p->scale(m_targetBounds.width(), m_targetBounds.height());
+
+    QBrush _oldBrush = p->brush();
+    if (m_fillPattern)
+        p->setBrush(Qt::NoBrush);
+
     if (m_rx || m_ry) {
         QT_SVG_DRAW_SHAPE(p->drawRoundedRect(m_rect, m_rx, m_ry, Qt::RelativeSize));
     } else {
         QT_SVG_DRAW_SHAPE(p->drawRect(m_rect));
     }
+
+    if (isRatioInPattern)
+        p->scale((1.0 / m_targetBounds.width()), (1.0 / m_targetBounds.height()));
+
+    if (m_fillPattern)
+        p->setBrush(_oldBrush);
+
     revertStyle(p, states);
+
+    if (m_fillPattern) {
+        QPainterPath path;
+        path.addRect(m_rect);
+        drawPatternNode(m_fillPattern, p, path, m_rect, states);
+    }
 }
 
 QSvgTspan * const QSvgText::LINEBREAK = 0;

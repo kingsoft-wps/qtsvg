@@ -50,13 +50,19 @@ QSvgNode::QSvgNode(QSvgNode *parent)
       m_visible(true),
       m_displayMode(BlockMode), 
       m_bClipRuleSet(false),
-      m_clipRule(Qt::WindingFill)
+      m_clipRule(Qt::WindingFill),
+      m_targetBounds(QRectF())
 {
 }
 
 QSvgNode::~QSvgNode()
 {
 
+}
+
+void QSvgNode::setTargetBounds(const QRectF &targetBounds)
+{
+    m_targetBounds = targetBounds;
 }
 
 bool QSvgNode::isDescendantOf(const QSvgNode *parent) const
@@ -228,6 +234,7 @@ QRectF QSvgNode::transformedBounds() const
 
     QPen pen(Qt::NoBrush, 1, Qt::SolidLine, Qt::FlatCap, Qt::SvgMiterJoin);
     pen.setMiterLimit(4);
+    pen.setSupportComoplex(false);
     p.setPen(pen);
 
     QStack<QSvgNode*> parentApplyStack;
@@ -333,6 +340,15 @@ QRectF QSvgNode::transformedBounds(QPainter *p, QSvgExtraStates &states,
     if (defaultViewCoord && m_cachedBounds.isEmpty() && rect.isValid())
         m_cachedBounds = rect;
     return rect;
+}
+
+QSvgNode *QSvgNode::getFillPattern()
+{
+    return nullptr;
+}
+
+void QSvgNode::updateFillPattern(QSvgNode *)
+{
 }
 
 void QSvgNode::setNodeId(const QString &i)

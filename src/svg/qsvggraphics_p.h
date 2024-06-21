@@ -123,10 +123,13 @@ public:
     Type type() const override;
     QSvgNode *clone(QSvgNode *parent) override;
     QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const override;
+    QSvgNode *getFillPattern() override;
+    void updateFillPattern(QSvgNode* fillPattern) override;
 
     const QRectF &bounds() const { return m_bounds; }
 private:
     QRectF m_bounds;
+    QSvgPattern *m_fillPattern;
 };
 
 class Q_SVG_PRIVATE_EXPORT QSvgCircle : public QSvgEllipse
@@ -140,7 +143,7 @@ public:
 class Q_SVG_PRIVATE_EXPORT QSvgImage : public QSvgNode
 {
 public:
-    QSvgImage(QSvgNode *parent, const QPixmap &image,
+    QSvgImage(QSvgNode *parent, const QImage &image,
               const QRectF &bounds);
     void draw(QPainter *p, QSvgExtraStates &states) override;
     Type type() const override;
@@ -148,9 +151,9 @@ public:
     QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const override;
 
     const QRectF &bounds() const { return m_bounds; }
-    QImage image() const { return m_image.toImage(); }
+    const QImage &image() const { return m_image; }
 private:
-    QPixmap m_image;
+    QImage m_image;
     QRectF m_bounds;
 };
 
@@ -181,6 +184,8 @@ public:
     Type type() const override;
     QSvgNode *clone(QSvgNode *parent) override;
     QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const override;
+    QSvgNode *getFillPattern() override;
+    void updateFillPattern(QSvgNode* fillPattern) override;
 
     QPainterPath *qpath() {
         return &m_path;
@@ -193,6 +198,7 @@ public:
 private:
     QSvgMarkerUse m_markerLink;
     QPainterPath m_path;
+    QSvgPattern *m_fillPattern;
 };
 
 class Q_SVG_PRIVATE_EXPORT QSvgPolygon : public QSvgNode
@@ -203,6 +209,8 @@ public:
     Type type() const override;
     QSvgNode *clone(QSvgNode *parent) override;
     QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const override;
+    QSvgNode *getFillPattern() override;
+    void updateFillPattern(QSvgNode* fillPattern) override;
 
     const QPolygonF &poly() const { return m_poly; }
     const QSvgMarkerUse &Marker() const { return m_markerLink; }
@@ -212,6 +220,7 @@ public:
 private:
     QSvgMarkerUse m_markerLink;
     QPolygonF m_poly;
+    QSvgPattern *m_fillPattern;
 };
 
 class Q_SVG_PRIVATE_EXPORT QSvgPolyline : public QSvgNode
@@ -222,6 +231,8 @@ public:
     Type type() const override;
     QSvgNode *clone(QSvgNode *parent) override;
     QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const override;
+    QSvgNode *getFillPattern() override;
+    void updateFillPattern(QSvgNode* fillPattern) override;
     const QPolygonF &poly() const { return m_poly; }
 
     const QSvgMarkerUse &Marker() const { return m_markerLink; }
@@ -231,6 +242,7 @@ public:
 private:
     QSvgMarkerUse m_markerLink;
     QPolygonF m_poly;
+    QSvgPattern *m_fillPattern;
 };
 
 class Q_SVG_PRIVATE_EXPORT QSvgRect : public QSvgNode
@@ -241,14 +253,16 @@ public:
     void draw(QPainter *p, QSvgExtraStates &states) override;
     QSvgNode *clone(QSvgNode *parent) override;
     QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const override;
+    QSvgNode *getFillPattern() override;
+    void updateFillPattern(QSvgNode* fillPattern) override;
 
     const QRectF &rect() const { return m_rect; }
     int x() const { return m_rx; }
     int y() const { return m_ry; }
-
 private:
     QRectF m_rect;
     int m_rx, m_ry;
+    QSvgPattern *m_fillPattern;
 };
 
 class  QSvgTspan;

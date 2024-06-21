@@ -61,7 +61,6 @@
 #include "QtCore/qxmlstream.h"
 #include "qsvgstyle_p.h"
 #include "qsvgfont_p.h"
-#include <functional>
 
 QT_BEGIN_NAMESPACE
 
@@ -79,12 +78,11 @@ public:
 class Q_SVG_PRIVATE_EXPORT QSvgTinyDocument : public QSvgStructureNode
 {
 public:
-    static QSvgTinyDocument *load(const QString &file, std::function<QPixmap(const QImage& img)> convertFunc);
-    static QSvgTinyDocument *load(const QByteArray &contents, std::function<QPixmap(const QImage& img)> convertFunc);
-    static QSvgTinyDocument *load(QXmlStreamReader *contents, std::function<QPixmap(const QImage& img)> convertFunc);
+    static QSvgTinyDocument *load(const QString &file);
+    static QSvgTinyDocument *load(const QByteArray &contents);
+    static QSvgTinyDocument *load(QXmlStreamReader *contents);
     static QSvgTinyDocument *load(const QString &file,
-                                  const QMap<QString, QMap<QString, QVariant>> &classProperties,
-                                  std::function<QPixmap(const QImage &img)> convertFunc);
+                                  const QMap<QString, QMap<QString, QVariant>> &classProperties);
 
 public:
     QSvgTinyDocument(QSvgNode *parent = nullptr);
@@ -116,6 +114,9 @@ public:
     void draw(QPainter *p);
     void draw(QPainter *p, const QRectF &bounds, const QRectF &source);
     void draw(QPainter *p, const QString &id, const QRectF &bounds = QRectF());
+    void draw(QPainter *p, const QRectF &bounds, const QRectF &source,
+              std::function<QPixmap(QPainter*, int, int)> createPixmapBuffer,
+              std::function<QPixmap(QPainter*, const QImage &img)> convertFunc);
 
     QMatrix matrixForElement(const QString &id) const;
     QRectF boundsOnElement(const QString &id) const;
@@ -146,6 +147,9 @@ public:
     void setSvgProp(const QSharedPointer<QSvgProp> &svgProp);
     QSvgProp *getSvgProp();
 
+    QPixmap createPixmapBuffer(QPainter *p, int, int);
+    QPixmap convertToPixmap(QPainter *p, const QImage &img);
+
 private:
     void mapSourceToTarget(QPainter *p, const QRectF &targetRect,
                            const QRectF &sourceRect = QRectF());
@@ -171,6 +175,8 @@ private:
 
     QSvgExtraStates m_states;
     QSharedPointer<QSvgProp> m_svgProp;
+    std::function<QPixmap(QPainter*, int, int)> m_createPixmapBufferFun = nullptr;
+    std::function<QPixmap(QPainter*, const QImage &img)> m_convertToPixmapFun = nullptr;
 };
 
 inline void QSvgTinyDocument::setCoord(const QPointF &coord)

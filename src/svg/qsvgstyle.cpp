@@ -372,10 +372,12 @@ void QSvgStrokeStyle::apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &
         setDashOffsetNeeded = true;
     }
 
-    // QPen's default-init-value is different from SVG-Standard
-    pen.setCapStyle(m_strokeLineCapSet ? m_stroke.capStyle() : Qt::FlatCap);
-    pen.setJoinStyle(m_strokeLineJoinSet ? m_stroke.joinStyle() : Qt::SvgMiterJoin);
-    pen.setMiterLimit(m_strokeMiterLimitSet ? m_stroke.miterLimit() : 4.0);
+    if (m_strokeLineCapSet)
+        pen.setCapStyle(m_stroke.capStyle());
+    if (m_strokeLineJoinSet)
+        pen.setJoinStyle(m_stroke.joinStyle());
+    if (m_strokeMiterLimitSet)
+        pen.setMiterLimit(m_stroke.miterLimit());
 
     // You can have dash offset on solid strokes in SVG files, but not in Qt.
     // QPen::setDashOffset() will set the pen style to Qt::CustomDashLine,
@@ -558,7 +560,7 @@ void QSvgClipPathStyle::initCurrePath(QRectF bounds)
     }
 }
 
-void QSvgClipPathStyle::apply(QPainter *p, const QSvgNode *node, QSvgExtraStates &states) 
+void QSvgClipPathStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &) 
 {
     if (nullptr != m_clipNode) 
     {
@@ -567,7 +569,7 @@ void QSvgClipPathStyle::apply(QPainter *p, const QSvgNode *node, QSvgExtraStates
     }
 }
 
-void QSvgClipPathStyle::revert(QPainter *p, QSvgExtraStates &states) 
+void QSvgClipPathStyle::revert(QPainter *p, QSvgExtraStates &) 
 {
     if (nullptr != m_clipNode)
         p->setClipPath(m_oldPath, Qt::ReplaceClip);

@@ -73,33 +73,52 @@ static void initNamedNodes(const QList<QSvgNode *> &renders, QHash<QString, QSvg
     }
 }
 
+static void resolvedPatternLink(const QList<QSvgNode *> &renders, QSvgTinyDocument *doc)
+{
+    for (QSvgNode *node : renders) {
+        if (auto oriPattern = node->getFillPattern()) {
+            if (auto newPattern = doc->namedNode(oriPattern->nodeId()))
+                node->updateFillPattern(newPattern);
+        }
+
+        switch (node->type()) {
+        case QSvgNode::G:
+        case QSvgNode::DEFS:
+        case QSvgNode::SWITCH:
+            resolvedPatternLink((static_cast<QSvgStructureNode *>(node))->renderers(), doc);
+        default:
+            break;
+        }
+    }
+}
+
 QSvgTinyDocument::QSvgTinyDocument(QSvgNode *parent /*= nullptr*/)
-    : QSvgStructureNode(parent)
-	, m_widthPercent(false)
-	, m_heightPercent(false)
-	, m_animated(false)
-	, m_firstRender(true)
-	, m_animationDuration(0)
-	, m_fps(30)
+    : QSvgStructureNode(parent),
+      m_widthPercent(false),
+      m_heightPercent(false),
+      m_animated(false),
+      m_firstRender(true),
+      m_animationDuration(0),
+      m_fps(30)
 {
 }
 QSvgTinyDocument::QSvgTinyDocument(const QSvgTinyDocument &other)
-    : QSvgStructureNode(other)
-	, m_coord(other.m_coord)
-	, m_size(other.m_size)
-	, m_widthPercent(other.m_widthPercent)
-	, m_heightPercent(other.m_heightPercent)
-	, m_firstRender(other.m_firstRender)
-	, m_viewBox(other.m_viewBox)
-	, m_fonts(other.m_fonts)
-	, m_namedStyles(other.m_namedStyles)
-	, m_time(other.m_time)
-	, m_animated(other.m_animated)
-	, m_animationDuration(other.m_animationDuration)
-	, m_fps(other.m_fps)
-	, m_states(other.m_states)
-	, m_svgProp(other.m_svgProp)
-	, m_xmlClassList(other.m_xmlClassList)
+    : QSvgStructureNode(other),
+      m_coord(other.m_coord),
+      m_size(other.m_size),
+      m_widthPercent(other.m_widthPercent),
+      m_heightPercent(other.m_heightPercent),
+      m_firstRender(other.m_firstRender),
+      m_viewBox(other.m_viewBox),
+      m_fonts(other.m_fonts),
+      m_namedStyles(other.m_namedStyles),
+      m_time(other.m_time),
+      m_animated(other.m_animated),
+      m_animationDuration(other.m_animationDuration),
+      m_fps(other.m_fps),
+      m_states(other.m_states),
+      m_svgProp(other.m_svgProp),
+      m_xmlClassList(other.m_xmlClassList)
 {
     m_namedNodes.reserve(other.m_namedNodes.size());
     initNamedNodes(m_renderers, m_namedNodes);
@@ -114,6 +133,8 @@ QSvgTinyDocument::QSvgTinyDocument(const QSvgTinyDocument &other)
                 graStyle->setStopLink(graStyle->stopLink(), this);
         }
     }
+    
+    resolvedPatternLink(m_renderers, this);
 }
 
 QSvgTinyDocument::~QSvgTinyDocument() {}
@@ -234,7 +255,7 @@ static QByteArray qt_inflateSvgzDataFrom(QIODevice *)
 }
 #endif
 
-QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName, std::function<QPixmap(const QImage& img)> convertFunc)
+QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName)
 {
     QFile file(fileName);
     if (!file.open(QFile::ReadOnly)) {
@@ -245,11 +266,11 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName, std::function
 
     if (fileName.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive)
             || fileName.endsWith(QLatin1String(".svg.gz"), Qt::CaseInsensitive)) {
-        return load(qt_inflateSvgzDataFrom(&file), convertFunc);
+        return load(qt_inflateSvgzDataFrom(&file));
     }
 
     QSvgTinyDocument *doc = 0;
-    QSvgHandler handler(&file, convertFunc);
+    QSvgHandler handler(&file);
     if (handler.ok()) {
         doc = handler.document();
         doc->m_animationDuration = handler.animationDuration();
@@ -262,7 +283,7 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QString &fileName, std::function
     return doc;
 }
 
-QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents, std::function<QPixmap(const QImage& img)> convertFunc)
+QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents)
 {
     QByteArray svg;
     // Check for gzip magic number and inflate if appropriate
@@ -279,8 +300,7 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents, std::funct
     QBuffer buffer;
     buffer.setData(svg);
     buffer.open(QIODevice::ReadOnly);
-    QSvgHandler handler(&buffer, convertFunc);
-
+    QSvgHandler handler(&buffer);
     QSvgTinyDocument *doc = nullptr;
     if (handler.ok()) {
         doc = handler.document();
@@ -291,9 +311,9 @@ QSvgTinyDocument * QSvgTinyDocument::load(const QByteArray &contents, std::funct
     return doc;
 }
 
-QSvgTinyDocument * QSvgTinyDocument::load(QXmlStreamReader *contents, std::function<QPixmap(const QImage& img)> convertFunc)
+QSvgTinyDocument * QSvgTinyDocument::load(QXmlStreamReader *contents)
 {
-    QSvgHandler handler(contents, convertFunc);
+    QSvgHandler handler(contents);
 
     QSvgTinyDocument *doc = 0;
     if (handler.ok()) {
@@ -307,8 +327,7 @@ QSvgTinyDocument * QSvgTinyDocument::load(QXmlStreamReader *contents, std::funct
 
 QSvgTinyDocument *
 QSvgTinyDocument::load(const QString &fileName,
-                       const QMap<QString, QMap<QString, QVariant>> &classProperties,
-                       std::function<QPixmap(const QImage &img)> convertFunc)
+                       const QMap<QString, QMap<QString, QVariant>> &classProperties)
 {
     QFile file(fileName);
     if (!file.open(QFile::ReadOnly)) {
@@ -320,12 +339,12 @@ QSvgTinyDocument::load(const QString &fileName,
 #ifndef QT_NO_COMPRESS
     if (fileName.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive)
         || fileName.endsWith(QLatin1String(".svg.gz"), Qt::CaseInsensitive)) {
-        return load(qt_inflateGZipDataFrom(&file), convertFunc);
+        return load(qt_inflateGZipDataFrom(&file));
     }
 #endif
 
     QSvgTinyDocument *doc = 0;
-    QSvgHandler handler(&file, classProperties, convertFunc);
+    QSvgHandler handler(&file, classProperties);
     if (handler.ok()) {
         doc = handler.document();
         doc->m_animationDuration = handler.animationDuration();
@@ -364,6 +383,7 @@ void QSvgTinyDocument::draw(QPainter *p, const QRectF &bounds, const QRectF & so
 
         QPen pen(Qt::NoBrush, 1, Qt::SolidLine, Qt::FlatCap, Qt::SvgMiterJoin);
         pen.setMiterLimit(4);
+        pen.setSupportComoplex(false);
         p->setFont(font);
         p->setPen(pen);
         p->setBrush(Qt::black);
@@ -371,7 +391,7 @@ void QSvgTinyDocument::draw(QPainter *p, const QRectF &bounds, const QRectF & so
         p->setRenderHint(QPainter::SmoothPixmapTransform);
     } else {
         mapSourceToTarget(p, QRectF(m_coord, size()), viewBox());
-	}
+    }
 
     QList<QSvgNode *>::iterator itr = m_renderers.begin();
     applyStyle(p, m_states);
@@ -412,6 +432,7 @@ void QSvgTinyDocument::draw(QPainter *p, const QString &id,
     //XXX set default style on the painter
     QPen pen(Qt::NoBrush, 1, Qt::SolidLine, Qt::FlatCap, Qt::SvgMiterJoin);
     pen.setMiterLimit(4);
+    pen.setSupportComoplex(false);
     p->setPen(pen);
     p->setBrush(Qt::black);
     p->setRenderHint(QPainter::Antialiasing);
@@ -444,6 +465,26 @@ void QSvgTinyDocument::draw(QPainter *p, const QString &id,
     p->restore();
 }
 
+void QSvgTinyDocument::draw(QPainter *p, const QRectF &bounds, const QRectF &source,
+                            std::function<QPixmap(QPainter*, int, int)> createFunc,
+                            std::function<QPixmap(QPainter*, const QImage &img)> convertFunc)
+{
+    QScopedValueRollback<std::function<QPixmap(QPainter*, int, int)>> valueRollbackCreateFunc(
+            m_createPixmapBufferFun, createFunc);
+    QScopedValueRollback<std::function<QPixmap(QPainter*, const QImage &img)>> valueRollbackConvertFunc(
+            m_convertToPixmapFun, convertFunc);
+    draw(p, bounds, source);
+}
+
+QPixmap QSvgTinyDocument::createPixmapBuffer(QPainter *p, int width, int height)
+{
+    return m_createPixmapBufferFun ? m_createPixmapBufferFun(p, width, height) : QPixmap(width, height);
+}
+
+QPixmap QSvgTinyDocument::convertToPixmap(QPainter *p, const QImage &img)
+{
+    return m_convertToPixmapFun ? m_convertToPixmapFun(p, img) : QPixmap::fromImage(img);
+}
 
 QSvgNode::Type QSvgTinyDocument::type() const
 {

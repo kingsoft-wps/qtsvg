@@ -416,6 +416,11 @@ QSvgAttributes::QSvgAttributes(const QXmlStreamAttributes &xmlAttributes, QSvgHa
                 offset = value;
             break;
 
+        case 'p':
+            if (name == QLatin1String("patternTransform"))
+                transform = value;
+            break;
+
         case 's':
             if (name.length() > 5 && QStringRef(name.string(), name.position() + 1, 5) == QLatin1String("troke")) {
                 QStringRef strokeRef(name.string(), name.position() + 6, name.length() - 6);
@@ -1117,13 +1122,20 @@ static void parseBrush(QSvgNode *node,
                 QStringRef(attributes.fill.string(), attributes.fill.position(), 3) == QLatin1String("url")) {
                 QStringRef urlRef(attributes.fill.string(), attributes.fill.position() + 3, attributes.fill.length() - 3);
                 QString id = idFromUrl(urlRef.toString());
-                prop->setGradientId(id);
-                QSvgStyleProperty *style = styleFromId(node, id);
-                if (style) {
-                    if (style->type() == QSvgStyleProperty::SOLID_COLOR || style->type() == QSvgStyleProperty::GRADIENT)
-                        prop->setFillStyle(reinterpret_cast<QSvgFillStyleProperty *>(style));
+
+                QSvgNode *namedNode = handler->document()->namedNode(id);
+                if (namedNode && namedNode->type() == QSvgNode::PATTERN){
+                    prop->setPatternId(id);
+                    node->updateFillPattern(namedNode);
                 } else {
-                    prop->setGradientResolved(false);
+                    prop->setGradientId(id);
+                    QSvgStyleProperty *style = styleFromId(node, id);
+                    if (style) {
+                        if (style->type() == QSvgStyleProperty::SOLID_COLOR || style->type() == QSvgStyleProperty::GRADIENT)
+                            prop->setFillStyle(reinterpret_cast<QSvgFillStyleProperty *>(style));
+                    } else {
+                        prop->setGradientResolved(false);
+                    }  
                 }
             } else if (attributes.fill != QLatin1String("none")) {
                 QColor color;
@@ -2134,12 +2146,6 @@ void QSvgHandler::parseCSStoXMLAttrs(QString css, QVector<QSvgCssAttribute> *att
     }
 }
 
-QPixmap QSvgHandler::convertToPixmap(const QImage& img)
-{
-    Q_ASSERT(m_convertToPixmapFun);
-    return m_convertToPixmapFun ? m_convertToPixmapFun(img) : QPixmap::fromImage(img);
-}
-
 static void cssStyleLookup(QSvgNode *node,
                            QSvgHandler *handler,
                            QSvgStyleSelector *selector)
@@ -2805,7 +2811,7 @@ static bool parseFontFaceNode(QSvgStyleProperty *parent,
 
     qreal unitsPerEm = toDouble(unitsPerEmStr);
     if (!unitsPerEm)
-        unitsPerEm = 1000;
+        unitsPerEm = QSvgFont::DEFAULT_UNITS_PER_EM;
 
     if (!name.isEmpty())
         font->setFamilyName(name);
@@ -2886,7 +2892,7 @@ static QSvgNode *createMarkerNode(QSvgNode *parent, const QXmlStreamAttributes &
     QString UnitsStr = attributes.value(QLatin1String("markerUnits")).toString();
     QString orientStr = attributes.value(QLatin1String("orient")).toString();
 
-    qreal refX = 0.0, refY = 0.0, markerUnits = 0.0, orient = 0.0, markerWidth = 0.0, markerHeight = 0.0;
+    qreal refX = 0.0, refY = 0.0, orient = 0.0, markerWidth = 0.0, markerHeight = 0.0;
     if (!refXStr.isEmpty()) {
         QSvgHandler::LengthType type;
         refX = parseLength(refXStr, type, handler);
@@ -2955,8 +2961,89 @@ static QSvgNode *createMarkerNode(QSvgNode *parent, const QXmlStreamAttributes &
     return node;
 }
 
+static QSvgNode *createPatternNode(QSvgNode *parent,const QXmlStreamAttributes &attributes,
+                                   QSvgHandler *handler)
+{
+    const QStringRef x = attributes.value(QLatin1String("x"));
+    const QStringRef y = attributes.value(QLatin1String("y"));
+    const QStringRef width  = attributes.value(QLatin1String("width"));
+    const QStringRef height = attributes.value(QLatin1String("height"));
+    //Default value: objectBoundingBox;
+    const QStringRef patternUnits = attributes.value(QLatin1String("patternUnits"));
+    //Default value: userSpaceOnUse.This attribute has no effect if a viewBox attribute is specified on the <pattern> element.
+    const QStringRef patternContentUnits = attributes.value(QLatin1String("patternContentUnits"));
+    const QStringRef viewBox = attributes.value(QLatin1String("viewBox"));
+    if (width.isEmpty() || height.isEmpty())
+        return nullptr;
+
+    bool isObjectBoundingBox = (patternUnits.compare(QLatin1String("userSpaceOnUse"), Qt::CaseInsensitive) != 0);
+    QSvgPattern::PatternUnits units = QSvgPattern::objectBoundingBox;
+    QSvgPattern::PatternUnits contentUnits = QSvgPattern::userSpaceOnUse;
+    qreal fx = 0.0, fy = 0.0, fWidth = 0.0, fHeight = 0.0;
+    QSvgHandler::LengthType type = QSvgHandler::LT_PX;
+    if ((patternContentUnits.compare(QLatin1String("objectBoundingBox"), Qt::CaseInsensitive) == 0))
+        contentUnits = QSvgPattern::objectBoundingBox;
+
+    QStringList viewBoxValues;
+    if (!viewBox.isEmpty()) {
+        contentUnits = QSvgPattern::userSpaceOnUse;
+        QString viewBoxStr = viewBox.toString();
+        viewBoxStr = viewBoxStr.replace(QLatin1Char(' '), QLatin1Char(','));
+        viewBoxStr = viewBoxStr.replace(QLatin1Char('\r'), QLatin1Char(','));
+        viewBoxStr = viewBoxStr.replace(QLatin1Char('\n'), QLatin1Char(','));
+        viewBoxStr = viewBoxStr.replace(QLatin1Char('\t'), QLatin1Char(','));
+        viewBoxValues = viewBoxStr.split(QLatin1Char(','), QString::SkipEmptyParts);
+    }
+
+    if (!x.isEmpty()) {
+        if (!isObjectBoundingBox)
+            fx = toDouble(x);
+        else
+            fx = convertToNumber(x, handler);
+    }
+
+    if (!y.isEmpty()) {
+        if (!isObjectBoundingBox)
+            fy = toDouble(y);
+        else
+            fy = convertToNumber(y, handler);
+    }
+
+    if (!isObjectBoundingBox) {
+        fWidth = parseLength(width, type, handler);
+        fWidth = convertToPixels(fWidth, true, type);
+        fHeight = parseLength(height, type, handler);
+        fHeight = convertToPixels(fHeight, false, type);
+        units = QSvgPattern::userSpaceOnUse;
+    } else {
+        fWidth = convertToNumber(width, handler);
+        fHeight = convertToNumber(height, handler);
+        units = QSvgPattern::objectBoundingBox;
+    }
+
+    QSvgPattern *pattern = new QSvgPattern(parent,
+                                           QRectF(fx,
+                                                  fy,
+                                                  fWidth,
+                                                  fHeight), units, contentUnits);
+    if (viewBoxValues.count() == 4) {
+        QString xStr = viewBoxValues.at(0).trimmed();
+        QString yStr = viewBoxValues.at(1).trimmed();
+        QString widthStr = viewBoxValues.at(2).trimmed();
+        QString heightStr = viewBoxValues.at(3).trimmed();
+        QSvgHandler::LengthType lt = QSvgHandler::LT_PX;
+        qreal fx = parseLength(xStr, lt, handler);
+        qreal fy = parseLength(yStr, lt, handler);
+        qreal fw = parseLength(widthStr, lt, handler);
+        qreal fh = parseLength(heightStr, lt, handler);
+        pattern->setViewBox(QRectF(fx, fy, fw, fh));
+    }
+
+    return pattern;
+}
+
 static QSvgNode *createClipPathNode(QSvgNode *parent, const QXmlStreamAttributes &attributes,
-                                    QSvgHandler *handler)
+                                    QSvgHandler *)
 {
     QSvgClipPath *node = new QSvgClipPath(parent);
 
@@ -3059,9 +3146,12 @@ static QSvgNode *createImageNode(QSvgNode *parent,
     if (image.format() == QImage::Format_ARGB32)
         image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
-    const QPixmap &pixmap = handler->convertToPixmap(image);
-
-    QSvgNode *img = new QSvgImage(parent, pixmap, QRectF(nx, ny, nwidth, nheight));
+    QSvgNode *img = new QSvgImage(parent,
+                                  image,
+                                  QRectF(nx,
+                                         ny,
+                                         nwidth,
+                                         nheight));
     return img;
 }
 
@@ -3754,6 +3844,9 @@ static FactoryMethod findGroupFactory(const QString &name)
     case 'm':
         if (ref == QLatin1String("arker")) return createMarkerNode;
         break;
+    case 'p':
+        if (ref == QLatin1String("attern")) return createPatternNode;
+        break;
     case 's':
         if (ref == QLatin1String("vg")) return createSvgNode;
         if (ref == QLatin1String("witch")) return createSwitchNode;
@@ -3922,31 +4015,27 @@ static StyleParseMethod findStyleUtilFactoryMethod(const QString &name)
     return 0;
 }
 
-QSvgHandler::QSvgHandler(QIODevice *device, ConvertImageToPixmap convertFun)
-    : xml(new QXmlStreamReader(device)), m_ownsReader(true), m_convertToPixmapFun(convertFun)
+QSvgHandler::QSvgHandler(QIODevice *device) : xml(new QXmlStreamReader(device))
+                                             , m_ownsReader(true)
 {
     init();
 }
 
-QSvgHandler::QSvgHandler(const QByteArray &data, ConvertImageToPixmap convertFun)
-    : xml(new QXmlStreamReader(data)), m_ownsReader(true), m_convertToPixmapFun(convertFun)
+QSvgHandler::QSvgHandler(const QByteArray &data) : xml(new QXmlStreamReader(data))
+                                                 , m_ownsReader(true)
 {
     init();
 }
 
-QSvgHandler::QSvgHandler(QXmlStreamReader *const reader, ConvertImageToPixmap convertFun)
-    : xml(reader), m_ownsReader(false), m_convertToPixmapFun(convertFun)
+QSvgHandler::QSvgHandler(QXmlStreamReader *const reader) : xml(reader)
+                                                         , m_ownsReader(false)
 {
     init();
 }
 
 QSvgHandler::QSvgHandler(QIODevice *device,
-                         const QMap<QString, QMap<QString, QVariant>> &classProperties,
-                         ConvertImageToPixmap convertFun)
-    : xml(new QXmlStreamReader(device)),
-      m_ownsReader(true),
-      m_classProperties(classProperties),
-      m_convertToPixmapFun(convertFun)
+                         const QMap<QString, QMap<QString, QVariant>> &classProperties)
+    : xml(new QXmlStreamReader(device)), m_ownsReader(true), m_classProperties(classProperties)
 {
     init();
 }
@@ -3959,6 +4048,7 @@ void QSvgHandler::init()
     m_defaultCoords = LT_PX;
     m_defaultPen = QPen(Qt::black, 1, Qt::SolidLine, Qt::FlatCap, Qt::SvgMiterJoin);
     m_defaultPen.setMiterLimit(4);
+    m_defaultPen.setSupportComoplex(false);
     parse();
 }
 
@@ -4102,7 +4192,7 @@ bool QSvgHandler::startElement(const QString &localName,
         node = method(m_doc ? m_nodes.top() : 0, attributes, this);
         Q_ASSERT(node);
         if (!m_doc) {
-            Q_ASSERT(node->type() == QSvgNode::DOC);
+            Q_ASSERT(node && node->type() == QSvgNode::DOC);
             m_doc = static_cast<QSvgTinyDocument*>(node);
         } else {
             switch (m_nodes.top()->type()) {
@@ -4111,10 +4201,13 @@ bool QSvgHandler::startElement(const QString &localName,
             case QSvgNode::DEFS:
             case QSvgNode::SWITCH:
             case QSvgNode::MARKER:
+            case QSvgNode::PATTERN:
             {
-                QSvgStructureNode *group =
-                    static_cast<QSvgStructureNode*>(m_nodes.top());
-                group->addChild(node, someId(attributes));
+                Q_ASSERT(node);
+                if (node) {
+                    QSvgStructureNode *group = static_cast<QSvgStructureNode *>(m_nodes.top());
+                    group->addChild(node, someId(attributes));
+                }
             }
                 break;
             default:
@@ -4147,6 +4240,7 @@ bool QSvgHandler::startElement(const QString &localName,
             case QSvgNode::SWITCH:
             case QSvgNode::MARKER:
             case QSvgNode::CLIPPATH:
+            case QSvgNode::PATTERN:
             {
                 if (node->type() == QSvgNode::TSPAN) {
                     const QByteArray msg = QByteArrayLiteral("\'tspan\' element in wrong context.");
@@ -4285,7 +4379,8 @@ void QSvgHandler::resolveGradients(QSvgNode *node, int nestedDepth)
 {
     if (!node || (node->type() != QSvgNode::DOC && node->type() != QSvgNode::G
         && node->type() != QSvgNode::DEFS && node->type() != QSvgNode::SWITCH
-        && node->type() != QSvgNode::MARKER && node->type() != QSvgNode::CLIPPATH)){
+        && node->type() != QSvgNode::MARKER && node->type() != QSvgNode::CLIPPATH
+        && node->type() != QSvgNode::PATTERN)){
         return;
     }
 
@@ -4297,7 +4392,11 @@ void QSvgHandler::resolveGradients(QSvgNode *node, int nestedDepth)
         if (fill && !fill->isGradientResolved()) {
             QString id = fill->gradientId();
             QSvgFillStyleProperty *style = structureNode->styleProperty(id);
-            if (style) {
+            QSvgNode *pattern = m_doc->namedNode(id);
+            if (pattern && pattern->type() == QSvgNode::PATTERN) {
+                (*it)->updateFillPattern(pattern);
+                fill->setPatternId(id);
+            } else if (style) {
                 fill->setFillStyle(style);
             } else {
                 qCWarning(lcSvgHandler, "%s", msgCouldNotResolveProperty(id, xml).constData());

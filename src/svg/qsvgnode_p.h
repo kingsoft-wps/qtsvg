@@ -87,7 +87,8 @@ public:
         TEXTAREA,
         TSPAN,
         USE,
-        VIDEO
+        VIDEO,
+        PATTERN
     };
     enum DisplayMode {
         InlineMode,
@@ -114,6 +115,7 @@ public:
     virtual ~QSvgNode();
     virtual void draw(QPainter *p, QSvgExtraStates &states) =0;
     virtual QSvgNode *clone(QSvgNode *parent) = 0;
+    virtual void setTargetBounds(const QRectF &targetBounds);
 
     QSvgNode *parent() const;
     void setParent(QSvgNode *parent);
@@ -132,8 +134,11 @@ public:
     virtual QRectF bounds(QPainter *p, QSvgExtraStates &states, bool defaultViewCoord) const;
     virtual QRectF transformedBounds(QPainter *p, QSvgExtraStates &states,
                                      bool defaultViewCoord = false) const;
+    virtual QSvgNode *getFillPattern();
+    virtual void updateFillPattern(QSvgNode*);
     QRectF transformedBounds() const;
     QRectF cacheBounds() const;
+    QRectF targetBounds() const;
 
     void setRequiredFeatures(const QStringList &lst);
     const QStringList & requiredFeatures() const;
@@ -171,6 +176,7 @@ public:
 
 protected:
     mutable QSvgStyle m_style;
+    QRectF m_targetBounds;
 
     static qreal strokeWidth(QPainter *p);
 private:
@@ -228,6 +234,11 @@ inline QSvgStyle &QSvgNode::style()
 inline const QSvgStyle &QSvgNode::style() const
 {
     return m_style;
+}
+
+inline QRectF QSvgNode::targetBounds() const
+{
+    return m_targetBounds;
 }
 
 inline QRectF QSvgNode::cacheBounds() const

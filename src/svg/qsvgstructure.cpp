@@ -414,7 +414,7 @@ QSvgMarker::QSvgMarker(QSvgNode *parent)
 {
 }
 
-void QSvgMarker::draw(QPainter *p, QSvgExtraStates &states) {}
+void QSvgMarker::draw(QPainter *, QSvgExtraStates &) {}
 
 void QSvgMarker::draw(QPainter *p, QSvgExtraStates &states, const QPointF& point, qreal angle,
                       qreal strokeWidth)
@@ -480,6 +480,173 @@ void QSvgMarker::setOrientAngle(qreal angle)
     m_orientAngle = angle;
 }
 
+QSvgPattern::QSvgPattern(QSvgNode *parent, const QRectF &bounds, PatternUnits units, PatternUnits contentUnits)
+    : QSvgStructureNode(parent)
+    , m_bounds(bounds)
+    , m_ratioBounds(bounds)
+    , m_viewBox(QRect())
+    , m_clipPath(QPainterPath())
+    , m_patternUnits(units)
+    , m_patternContentUnits(contentUnits)
+{
+
+}
+
+void QSvgPattern::draw(QPainter *, QSvgExtraStates &)
+{
+    // noop
+}
+
+QRectF QSvgPattern::rect4DrawTile(qreal fPatternX, qreal fPatternY)
+{
+    qreal fSvgWidth = static_cast<qreal>(document()->width());
+    qreal fSvgHeight = static_cast<qreal>(document()->height());
+    QRectF rect(0.0, 0.0, fSvgWidth, fSvgHeight);
+
+    qreal fXPatternInSvg = fPatternX, fYPatternInSvg = fPatternY;
+    if (m_style.transform) {
+        fXPatternInSvg += m_style.transform->qtransform().dx();
+        fYPatternInSvg += m_style.transform->qtransform().dy();
+    }
+
+    qreal fExtendWidth = 0.0;
+    while (qAbs(fXPatternInSvg) > fExtendWidth)
+        fExtendWidth += fSvgWidth;
+    if (!qFuzzyIsNull(fExtendWidth)) {
+        rect.setX(-(fExtendWidth));
+        rect.setWidth(fExtendWidth + rect.width());
+    }
+
+    qreal fExtendHeight = 0.0;
+    while (qAbs(fYPatternInSvg) > fExtendHeight)
+        fExtendHeight += fSvgHeight;
+    if (!qFuzzyIsNull(fExtendHeight)) {
+        rect.setY(-(fExtendHeight));
+        rect.setHeight(fExtendHeight + rect.height());
+    }
+
+    if (m_style.transform) {
+        QTransform copy = m_style.transform->qtransform();
+        qreal fTangent = 0.0;
+        if (!qFuzzyIsNull(copy.m22())) {//skewX
+            fTangent = copy.m21() / copy.m22();//m21 = m22*tan(degrees)
+            fExtendWidth = m_bounds.height() * fTangent;
+            rect.setX(rect.x() - qAbs(fExtendWidth));
+            rect.setWidth(rect.width() + qAbs(fExtendWidth));
+        }
+
+        fTangent = 0.0;
+        if (!qFuzzyIsNull(copy.m11())) {//skewY
+            fTangent = copy.m12() / copy.m11();//m12 = m11*tan(degrees)
+            fExtendHeight = m_bounds.width() * fTangent;
+            rect.setY(rect.y() - qAbs(fExtendHeight));
+            rect.setHeight(rect.height() + qAbs(fExtendHeight));
+        }
+
+        qreal fScale = 0.0;
+        qreal m11Abs = qAbs(copy.m11());
+        if ((m11Abs < 1) && (m11Abs > 0) && (!qFuzzyIsNull(m11Abs))) {
+            fScale = 1.0 / m11Abs;
+            qreal fOldWidth = rect.width();
+            rect.setX((rect.x() - fSvgWidth / 2) * fScale + fSvgWidth / 2);
+            rect.setWidth(fOldWidth * fScale);
+        }
+
+        qreal m22Abs = qAbs(copy.m22());
+        if ((m22Abs < 1) && (m22Abs > 0) && (!qFuzzyIsNull(m22Abs))) {
+            fScale = 1.0 / m22Abs;
+            qreal fOldHeight = rect.height();
+            rect.setY((rect.y() - fSvgHeight / 2) * fScale + fSvgHeight / 2);
+            rect.setHeight(fOldHeight * fScale);
+        }
+    }
+
+    return rect;
+}
+
+QPixmap QSvgPattern::patternContentPixmap(QPainter *p, QSvgExtraStates &states)
+{
+    QPixmap pixmap;
+    if (auto tinydoc = document())
+        pixmap = tinydoc->createPixmapBuffer(p, m_bounds.width(), m_bounds.height());
+    else
+        pixmap = QPixmap(m_bounds.width(), m_bounds.height());
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setBrush(QBrush(Qt::black));
+    auto itr = m_renderers.cbegin();
+    while (itr != m_renderers.cend()) {
+        QSvgNode *node = *itr;
+        if ((node->isVisible()) && (node->displayMode() != QSvgNode::NoneMode)) {
+            if (m_patternContentUnits == objectBoundingBox)
+                node->setTargetBounds(m_targetBounds);
+            node->draw(&painter, states);
+        }
+        ++itr;
+    }
+    painter.end();
+    return pixmap;
+}
+
+void QSvgPattern::drawTile(QPainter *p, QSvgExtraStates &states)
+{
+    if (objectBoundingBox == m_patternUnits) {// calculate pattern real bounds
+        qreal fx = m_ratioBounds.x() * m_targetBounds.width();
+        qreal fy = m_ratioBounds.y() * m_targetBounds.height();
+        qreal fw = m_ratioBounds.width() * m_targetBounds.width();
+        qreal fh = m_ratioBounds.height() * m_targetBounds.height();
+        m_bounds.setRect(fx, fy, fw, fh);
+    }
+
+    applyStyle(p, states);
+	p->setRenderHint(QPainter::SmoothPixmapTransform, false);
+	p->setRenderHint(QPainter::HighQualityPixmapTransform, false);
+    p->setClipping(true);
+    if (!m_clipPath.isEmpty()) {
+        if (m_style.transform)
+            p->setClipPath(m_style.transform->qtransform().inverted().map(m_clipPath));
+        else
+            p->setClipPath(m_clipPath);
+    }
+
+    qreal fXPatternInSvg = m_bounds.x(), fYPatternInSvg = m_bounds.y();
+    if (objectBoundingBox == m_patternUnits) {
+        fXPatternInSvg += m_targetBounds.x();
+        fYPatternInSvg += m_targetBounds.y();
+    }
+
+    QRectF rect = rect4DrawTile(fXPatternInSvg, fYPatternInSvg);
+
+    if (fXPatternInSvg || fYPatternInSvg)
+        p->translate(fXPatternInSvg, fYPatternInSvg);
+
+    QPixmap pixmap = patternContentPixmap(p, states);
+    p->drawTiledPixmap(rect, pixmap, QPointF(rect.x(),rect.y()));
+
+    p->setClipping(false);
+    if (fXPatternInSvg || fYPatternInSvg)
+        p->translate(-fXPatternInSvg, -fYPatternInSvg);
+    revertStyle(p, states);
+}
+
+void QSvgPattern::setClipPath(const QPainterPath &path)
+{
+    m_clipPath = path;
+}
+
+QSvgNode *QSvgPattern::clone(QSvgNode *parent)
+{
+    QSvgPattern *newNode = new QSvgPattern(*this);
+    newNode->setParent(parent);
+    return newNode;
+}
+
+QSvgNode::Type QSvgPattern::type() const
+{
+    return PATTERN;
+}
+
 QSvgClipPath::QSvgClipPath(QSvgNode *parent) 
     : QSvgStructureNode(parent), 
       m_coordinateMode(userSpaceOnUse), 
@@ -507,6 +674,8 @@ static void addTextPath(QSvgText *pText, QPainterPath &clipPath)
         const QSvgText *toParent = static_cast<const QSvgText *>(tspan->parent());
         QSvgFontStyle *pFontStyle =
                 static_cast<QSvgFontStyle *>(tspan->styleProperty(QSvgStyleProperty::FONT));
+        if (!pFontStyle)
+            continue;
 
         QFont font = pFontStyle->qfont();
         font.setPixelSize(font.pointSizeF());

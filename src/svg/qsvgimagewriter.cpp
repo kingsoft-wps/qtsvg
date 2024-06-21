@@ -187,7 +187,8 @@ QString translate_node(QSvgNode::Type type)
         "textarea",
         "tspan",
         "use",
-        "video"
+        "video",
+        "pattern"
     };
     return QLatin1String(QSvgNode2Str[type]);
 }
@@ -420,6 +421,9 @@ void QSvgStyleWriter::writeFill()
         else
             m_pWriter->writeAttribute(QLatin1String("fill"), QLatin1String("none"));
     }
+
+    if (!fill->patternId().isEmpty())
+        m_pWriter->writeAttribute(QLatin1String("fill"), QString::fromLatin1("url(#%1)").arg(fill->patternId()));
 
     //fill-opacity
     if (fill->isFillOpacitySet())
@@ -737,6 +741,7 @@ protected:
     void writeImage(const QSvgImage* node);
     void writeLine(const QSvgLine* node);
     void writePath(const QSvgPath* node);
+    void writePattern(const QSvgPattern* node);
     void writePoly(const QSvgNode* node);
     void writeRect(const QSvgRect* node);
     void writeText(const QSvgText* node);
@@ -842,6 +847,10 @@ void QSvgImageWriterPrivate::writeSvgNode(const QSvgNode* node)
         break;
     case QSvgNode::PATH:
         writePath(static_cast<const QSvgPath*>(node));
+        break;
+    case QSvgNode::PATTERN:
+        writePattern(static_cast<const QSvgPattern*>(node));
+        writeStructure(static_cast<const QSvgStructureNode*>(node));
         break;
     case QSvgNode::POLYGON:
     case QSvgNode::POLYLINE:
@@ -971,6 +980,39 @@ void QSvgImageWriterPrivate::writePath(const QSvgPath* node)
 {
     xmlWriter.writeAttribute(QLatin1String("d"), translate_path(node->path()));
     writeMarkerLink(xmlWriter, node->Marker());
+}
+
+void QSvgImageWriterPrivate::writePattern(const QSvgPattern *node)
+{
+    if (node->viewBox().isValid()) {
+        QString viewBox = QString::fromLatin1("%1 %2 %3 %4")
+                                    .arg(node->viewBox().x())
+                                    .arg(node->viewBox().y())
+                                    .arg(node->viewBox().width())
+                                    .arg(node->viewBox().height());
+        xmlWriter.writeAttribute(QLatin1String("viewBox"), viewBox);
+    }
+
+    if (node->patternUnits() == QSvgPattern::userSpaceOnUse)
+        xmlWriter.writeAttribute(QLatin1String("patternUnits"), QLatin1String("userSpaceOnUse"));
+    else
+        xmlWriter.writeAttribute(QLatin1String("patternUnits"), QLatin1String("objectBoundingBox"));
+
+    const QRectF &rectf = (node->patternUnits() == QSvgPattern::userSpaceOnUse) ? node->bounds() : node->ratioBounds();
+    xmlWriter.writeAttribute(QLatin1String("x"), QString::number(rectf.x()));
+    xmlWriter.writeAttribute(QLatin1String("y"), QString::number(rectf.y()));
+    xmlWriter.writeAttribute(QLatin1String("width"), QString::number(rectf.width()));
+    xmlWriter.writeAttribute(QLatin1String("height"), QString::number(rectf.height()));
+
+    if (node->patternContentUnits() == QSvgPattern::userSpaceOnUse)
+        xmlWriter.writeAttribute(QLatin1String("patternContentUnits"), QLatin1String("userSpaceOnUse"));
+    else
+        xmlWriter.writeAttribute(QLatin1String("patternContentUnits"), QLatin1String("objectBoundingBox"));
+
+    if (node->style().transform) {
+        const QTransform& trans = node->style().transform->qtransform();
+        xmlWriter.writeAttribute(QLatin1String("patternTransform"), translate_matrix(trans.toAffine()));
+    }
 }
 
 void QSvgImageWriterPrivate::writePoly(const QSvgNode* node)
