@@ -356,6 +356,10 @@ public:
     const QVector<qreal> &offsetX() const { return m_offsetX; }
     const QVector<qreal> &offsetY() const { return m_offsetY; }
 
+    void setCoordAndOffsetType(const QVector<int> &coordXType, const QVector<int> &coordYType,
+                               const QVector<int> &offsetXType, const QVector<int> &offsetYType);
+    void updateOffsetY(QPainter *p, QSvgExtraStates &states);
+
 private:
     QList<QSvgTspan *> m_renderers;
     QString m_text;
@@ -366,6 +370,11 @@ private:
     QVector<qreal> m_coordY;
     QVector<qreal> m_offsetX;
     QVector<qreal> m_offsetY;
+
+    QVector<int> m_coordXType;
+    QVector<int> m_coordYType;
+    QVector<int> m_offsetXType;
+    QVector<int> m_offsetYType;
 };
 
 class QSvgUse : public QSvgNode

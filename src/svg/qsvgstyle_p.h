@@ -193,24 +193,24 @@ public:
     void revert(QPainter *p, QSvgExtraStates &states) override;
     Type type() const override;
 private:
-    // color-render ing v 	v 	'auto' | 'optimizeSpeed' |
+    // color-render ing v     v     'auto' | 'optimizeSpeed' |
     //                                  'optimizeQuality' | 'inherit'
     //int m_colorRendering;
 
-    // shape-rendering v 	v 	'auto' | 'optimizeSpeed' | 'crispEdges' |
+    // shape-rendering v     v     'auto' | 'optimizeSpeed' | 'crispEdges' |
     //                                  'geometricPrecision' | 'inherit'
     //QSvgShapeRendering m_shapeRendering;
 
 
-    // text-rendering    v 	v 	'auto' | 'optimizeSpeed' | 'optimizeLegibility'
+    // text-rendering    v     v     'auto' | 'optimizeSpeed' | 'optimizeLegibility'
     //                                | 'geometricPrecision' | 'inherit'
     //QSvgTextRendering m_textRendering;
 
 
-    // vector-effect         v 	x 	'default' | 'non-scaling-stroke' | 'inherit'
+    // vector-effect         v     x     'default' | 'non-scaling-stroke' | 'inherit'
     //QSvgVectorEffect m_vectorEffect;
 
-    // image-rendering v 	v 	'auto' | 'optimizeSpeed' | 'optimizeQuality' |
+    // image-rendering v     v     'auto' | 'optimizeSpeed' | 'optimizeQuality' |
     //                                      'inherit'
     //QSvgImageRendering m_imageRendering;
 };
@@ -301,8 +301,8 @@ public:
     bool isFillSet() const { return m_fillSet; }
 
 private:
-    // fill            v 	v 	'inherit' | <Paint.datatype>
-    // fill-opacity    v 	v 	'inherit' | <OpacityValue.datatype>
+    // fill            v     v     'inherit' | <Paint.datatype>
+    // fill-opacity    v     v     'inherit' | <OpacityValue.datatype>
     QBrush m_fill;
     QBrush m_oldFill;
     QSvgRefCounter<QSvgFillStyleProperty> m_style;
@@ -334,8 +334,8 @@ public:
         return m_viewportFill;
     }
 private:
-    // viewport-fill         v 	x 	'inherit' | <Paint.datatype>
-    // viewport-fill-opacity 	v 	x 	'inherit' | <OpacityValue.datatype>
+    // viewport-fill         v     x     'inherit' | <Paint.datatype>
+    // viewport-fill-opacity     v     x     'inherit' | <OpacityValue.datatype>
     QBrush m_viewportFill;
 
     QBrush m_oldFill;
@@ -369,6 +369,18 @@ public:
 
     void setFamily(const QString &family)
     {
+        for (const auto& f : family.split(','))
+        {
+            if (isValidFamily(f))
+            {
+                m_qfont.setFamily(f);
+                m_familySet = 1;
+                if (!m_svgFont)
+                    m_validFamily = true;
+                return;
+            }
+        }
+
         m_qfont.setFamily(family);
         m_familySet = 1;
         if (!m_svgFont)
@@ -578,14 +590,14 @@ public:
     bool isVectorEffectSet() const { return m_vectorEffectSet; }
 
 private:
-    // stroke            v 	v 	'inherit' | <Paint.datatype>
-    // stroke-dasharray  v 	v 	'inherit' | <StrokeDashArrayValue.datatype>
-    // stroke-dashoffset v 	v 	'inherit' | <StrokeDashOffsetValue.datatype>
-    // stroke-linecap    v 	v 	'butt' | 'round' | 'square' | 'inherit'
-    // stroke-linejoin   v 	v 	'miter' | 'round' | 'bevel' | 'inherit'
-    // stroke-miterlimit v 	v 	'inherit' | <StrokeMiterLimitValue.datatype>
-    // stroke-opacity    v 	v 	'inherit' | <OpacityValue.datatype>
-    // stroke-width      v 	v 	'inherit' | <StrokeWidthValue.datatype>
+    // stroke            v     v     'inherit' | <Paint.datatype>
+    // stroke-dasharray  v     v     'inherit' | <StrokeDashArrayValue.datatype>
+    // stroke-dashoffset v     v     'inherit' | <StrokeDashOffsetValue.datatype>
+    // stroke-linecap    v     v     'butt' | 'round' | 'square' | 'inherit'
+    // stroke-linejoin   v     v     'miter' | 'round' | 'bevel' | 'inherit'
+    // stroke-miterlimit v     v     'inherit' | <StrokeMiterLimitValue.datatype>
+    // stroke-opacity    v     v     'inherit' | <OpacityValue.datatype>
+    // stroke-width      v     v     'inherit' | <StrokeWidthValue.datatype>
     QPen m_stroke;
     QPen m_oldStroke;
     qreal m_strokeOpacity;
@@ -629,8 +641,8 @@ public:
     QBrush brush() override { return m_solidColor; }
 
 private:
-    // solid-color       v 	x 	'inherit' | <SVGColor.datatype>
-    // solid-opacity     v 	x 	'inherit' | <OpacityValue.datatype>
+    // solid-color       v     x     'inherit' | <SVGColor.datatype>
+    // solid-opacity     v     x     'inherit' | <OpacityValue.datatype>
     QColor m_solidColor;
 
     QBrush m_oldFill;
@@ -848,6 +860,7 @@ public:
 
 private:
     QSvgClipPath *m_clipNode;
+    bool m_oldEnabled = false;
     QPainterPath m_oldPath;
     QPainterPath m_currePath;
     QString m_clipId;
@@ -892,10 +905,10 @@ public:
 /********************************************************/
 // NOT implemented:
 
-// color           v 	v 	'inherit' | <Color.datatype>
+// color           v     v     'inherit' | <Color.datatype>
 //QColor m_color;
 
-// display         v 	x 	'inline' | 'block' | 'list-item'
+// display         v     x     'inline' | 'block' | 'list-item'
 //                                 | 'run-in' | 'compact' | 'marker' |
 //                                 'table' | 'inline-table' |
 //                                 'table-row-group' | 'table-header-group' |
@@ -905,27 +918,27 @@ public:
 //                                 'none' | 'inherit'
 //QSvgDisplayStyle m_display;
 
-// display-align   v 	v 	'auto' | 'before' | 'center' | 'after' | 'inherit'
+// display-align   v     v     'auto' | 'before' | 'center' | 'after' | 'inherit'
 //QSvgDisplayAlign m_displayAlign;
 
-// line-increment  v 	v 	'auto' | 'inherit' | <Number.datatype>
+// line-increment  v     v     'auto' | 'inherit' | <Number.datatype>
 //int m_lineIncrement;
 
-// text-anchor       v 	v 	'start' | 'middle' | 'end' | 'inherit'
+// text-anchor       v     v     'start' | 'middle' | 'end' | 'inherit'
 //QSvgTextAnchor m_textAnchor;
 
-// visibility 	v 	v 	'visible' | 'hidden' | 'inherit'
+// visibility     v     v     'visible' | 'hidden' | 'inherit'
 //QSvgVisibility m_visibility;
 
 /******************************************************/
 // the following do not make sense for us
 
-// pointer-events  v 	v 	'visiblePainted' | 'visibleFill' | 'visibleStroke' |
+// pointer-events  v     v     'visiblePainted' | 'visibleFill' | 'visibleStroke' |
 //                              'visible' | 'painted' | 'fill' | 'stroke' | 'all' |
 //                              'none' | 'inherit'
 //QSvgPointEvents m_pointerEvents;
 
-// audio-level     v  	x  	'inherit' | <Number.datatype>
+// audio-level     v      x      'inherit' | <Number.datatype>
 
 QT_END_NAMESPACE
 

@@ -92,6 +92,21 @@ public:
 
     void setResolution(int dpi);
     int resolution() const;
+
+    bool clipPathEnabled() const;
+    void setClipPathEnabled(bool enable);
+
+    bool textCoordEnabled() const;
+    void setTextCoordEnabled(bool enable);
+
+    bool trimEmptyGroupEnabled() const;
+    void setTrimEmptyGroupEnabled(bool enable);
+
+    QString dataPrefix() const;
+    void setDataPrefix(const QString& prefix);
+
+    void beginGroup(const QMap<QString, QString> *attrs);
+    void endGroup();
 protected:
     QPaintEngine *paintEngine() const override;
     int metric(QPaintDevice::PaintDeviceMetric metric) const override;

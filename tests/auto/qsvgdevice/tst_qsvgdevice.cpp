@@ -100,14 +100,14 @@ class SVGDummyDevice : public QPaintDevice
 {
 public:
     SVGDummyDevice()
-	: QPaintDevice(QInternal::ExternalDevice), eng(0) { }
+    : QPaintDevice(QInternal::ExternalDevice), eng(0) { }
     ~SVGDummyDevice() {
-	delete eng;
+    delete eng;
     }
     QPaintEngine *engine() const {
-	if (!eng)
-	    const_cast<SVGDummyDevice *>(this)->eng = new QSVGPaintEngine;
-	return eng;
+    if (!eng)
+        const_cast<SVGDummyDevice *>(this)->eng = new QSVGPaintEngine;
+    return eng;
     }
 
 private:
@@ -155,176 +155,176 @@ void tst_QSvgDevice::play()
 void tst_QSvgDevice::playPaint( QPainter *p, const QString &type )
 {
     if ( type == "lines" ) {
-	// line with pen width 0
-	p->setPen( QPen( Qt::black, 0, Qt::SolidLine ) );
-	p->drawLine( 10, 0, 20, 3 );
+    // line with pen width 0
+    p->setPen( QPen( Qt::black, 0, Qt::SolidLine ) );
+    p->drawLine( 10, 0, 20, 3 );
 
-	// line with pen width 1
-	p->setPen( QPen( Qt::black, 1, Qt::SolidLine ) );
-	p->drawLine( 2, 0, 10, 3 );
+    // line with pen width 1
+    p->setPen( QPen( Qt::black, 1, Qt::SolidLine ) );
+    p->drawLine( 2, 0, 10, 3 );
 
-	// rect without outline (qt-bugs/arc-17/35556)
-	p->setPen( Qt::NoPen );
-	p->setBrush( Qt::red );
-	p->drawRect( 5, 10, 20, 30 );
+    // rect without outline (qt-bugs/arc-17/35556)
+    p->setPen( Qt::NoPen );
+    p->setBrush( Qt::red );
+    p->drawRect( 5, 10, 20, 30 );
     } else if ( type == "text" ) {
-	QFont f = p->font();
-	f.setItalic( TRUE );
-	f.setBold( TRUE );
-	p->setFont( f );
-	p->drawText( 5, 55, "Text" );
+    QFont f = p->font();
+    f.setItalic( TRUE );
+    f.setBold( TRUE );
+    p->setFont( f );
+    p->drawText( 5, 55, "Text" );
     } else if ( type == "polyline" ) {
-	// we'll draw 4 triangular polylines. Only two will show up
-	// as the QPainter::drawPolyline() doesn't respect the brush
-	// just the pen setting
-	QPolygon pa( 3 );
-	pa.setPoint( 0, 0, 0 );
-	pa.setPoint( 1, 10, 0 );
-	pa.setPoint( 2, 0, 10 );
+    // we'll draw 4 triangular polylines. Only two will show up
+    // as the QPainter::drawPolyline() doesn't respect the brush
+    // just the pen setting
+    QPolygon pa( 3 );
+    pa.setPoint( 0, 0, 0 );
+    pa.setPoint( 1, 10, 0 );
+    pa.setPoint( 2, 0, 10 );
 
-	// frame around the following 4 polylines
-	p->setBrush( Qt::NoBrush );
-	p->setPen( Qt::SolidLine );
-	p->drawRect( 46, 3, 19, 60 );
+    // frame around the following 4 polylines
+    p->setBrush( Qt::NoBrush );
+    p->setPen( Qt::SolidLine );
+    p->drawRect( 46, 3, 19, 60 );
 
-	// polyline with blue brush, no pen
-	p->setPen( Qt::NoPen );
-	p->setBrush( Qt::blue );
-	p->translate( 50, 5 );
-	p->drawPolyline( pa );
+    // polyline with blue brush, no pen
+    p->setPen( Qt::NoPen );
+    p->setBrush( Qt::blue );
+    p->translate( 50, 5 );
+    p->drawPolyline( pa );
 
-	// polyline without brush, no pen
-	p->setBrush( Qt::NoBrush );
-	p->translate( 0, 15 );
-	p->drawPolyline( pa );
+    // polyline without brush, no pen
+    p->setBrush( Qt::NoBrush );
+    p->translate( 0, 15 );
+    p->drawPolyline( pa );
 
-	// polyline with green brush, solid pen
-	p->setBrush( Qt::green );
-	p->setPen( Qt::SolidLine );
-	p->translate( 0, 15 );
-	p->drawPolyline( pa );
+    // polyline with green brush, solid pen
+    p->setBrush( Qt::green );
+    p->setPen( Qt::SolidLine );
+    p->translate( 0, 15 );
+    p->drawPolyline( pa );
 
-	// polyline without brush, solid pen
-	p->setBrush( Qt::NoBrush );
-	p->setPen( Qt::SolidLine );
-	p->translate( 0, 15 );
-	p->drawPolyline( pa );
+    // polyline without brush, solid pen
+    p->setBrush( Qt::NoBrush );
+    p->setPen( Qt::SolidLine );
+    p->translate( 0, 15 );
+    p->drawPolyline( pa );
     } else if ( type == "translate" ) {
-	p->translate(-10,-10);
-	p->save();
-	p->setBrush( Qt::blue );
-	p->drawRect( 20, 30, 50, 20 );
-	p->restore();
-	p->setBrush( Qt::green );
-	p->drawRect( 70, 50, 10, 10 );
+    p->translate(-10,-10);
+    p->save();
+    p->setBrush( Qt::blue );
+    p->drawRect( 20, 30, 50, 20 );
+    p->restore();
+    p->setBrush( Qt::green );
+    p->drawRect( 70, 50, 10, 10 );
     } else if ( type == "scaleRect" ) {
-	p->scale( 1, 2 );
-	p->setBrush( Qt::blue );
-	p->drawRect( 20, 20, 60, 60 );
+    p->scale( 1, 2 );
+    p->setBrush( Qt::blue );
+    p->drawRect( 20, 20, 60, 60 );
     } else if ( type == "ellipseEven" ) {
-	p->setBrush( Qt::blue );
-	p->drawEllipse( 20, 20, 60, 60 );
+    p->setBrush( Qt::blue );
+    p->drawEllipse( 20, 20, 60, 60 );
     } else if ( type == "ellipseOdd" ) {
-	p->setBrush( Qt::blue );
-	p->drawEllipse( 20, 20, 59, 59 );
+    p->setBrush( Qt::blue );
+    p->drawEllipse( 20, 20, 59, 59 );
     } else if ( type == "ellipseRandom" ) {
-	p->setBrush( Qt::blue );
-	p->drawEllipse( 20, 34, 89, 123 );
+    p->setBrush( Qt::blue );
+    p->drawEllipse( 20, 34, 89, 123 );
     } else if ( type == "scaleText" ) {
-	p->scale(0.25,0.25);
-	p->drawText(200,200,"Hello!");
+    p->scale(0.25,0.25);
+    p->drawText(200,200,"Hello!");
     } else if ( type == "scaleTextWithFont" ) {
-	p->setFont(QFont("Helvetica",12));
-	p->scale(0.25,0.25);
-	p->drawText(200,200,"Hello!");
+    p->setFont(QFont("Helvetica",12));
+    p->scale(0.25,0.25);
+    p->drawText(200,200,"Hello!");
 #ifdef Q_WS_WIN
     // Only test on Windows for now, visually it looks fine, but
     // it's failing for some reason on Linux
     } else if ( type == "scaleTextSaveRestore" ) {
         p->scale(1,-1);
-	p->save();
-	p->setFont(QFont("Helvetica",12));
-	p->scale(0.5,0.5);
-	p->drawText(0,0,"Hello!");
-	p->restore();
+    p->save();
+    p->setFont(QFont("Helvetica",12));
+    p->scale(0.5,0.5);
+    p->drawText(0,0,"Hello!");
+    p->restore();
 #endif
     } else if ( type == "scaleLineWithPen" ) {
         p->scale(0.1,0.1);
-	p->setPen(QPen(Qt::red,100));
-	p->drawLine(3,3,500,500);
+    p->setPen(QPen(Qt::red,100));
+    p->drawLine(3,3,500,500);
     } else if ( type == "task-17637" ) {
-	p->translate(0,200);
-	p->scale(0.01,-0.01);
-	p->setBrush(Qt::blue);
-	p->drawEllipse(2000,2000,6000,6000);
-	p->setPen(QPen(Qt::red,100));
-	p->setFont(QFont("Helvetica",12));
-	p->save();
-	p->scale(1,-1);
-	p->drawText(4000,4000,"Hello!");
-	p->restore();
-	p->drawLine(3000,3000,5000,5000);
+    p->translate(0,200);
+    p->scale(0.01,-0.01);
+    p->setBrush(Qt::blue);
+    p->drawEllipse(2000,2000,6000,6000);
+    p->setPen(QPen(Qt::red,100));
+    p->setFont(QFont("Helvetica",12));
+    p->save();
+    p->scale(1,-1);
+    p->drawText(4000,4000,"Hello!");
+    p->restore();
+    p->drawLine(3000,3000,5000,5000);
     } else if ( type == "dashed-lines" ) {
-	p->setPen(QPen(Qt::red, 1, Qt::DashLine));
-	p->drawLine(10,10,50,50);
+    p->setPen(QPen(Qt::red, 1, Qt::DashLine));
+    p->drawLine(10,10,50,50);
     } else if ( type == "dot-lines" ) {
-	p->setPen(QPen(Qt::red, 1, Qt::DotLine));
-	p->drawLine(10,10,50,50);
+    p->setPen(QPen(Qt::red, 1, Qt::DotLine));
+    p->drawLine(10,10,50,50);
     } else if ( type == "dashed-dot-lines" ) {
-	p->setPen(QPen(Qt::red, 1, Qt::DashDotLine));
-	p->drawLine(10,10,50,50);
+    p->setPen(QPen(Qt::red, 1, Qt::DashDotLine));
+    p->drawLine(10,10,50,50);
     } else if ( type == "dashed-dot-dot-lines" ) {
-	p->setPen(QPen(Qt::red, 1, Qt::DashDotDotLine));
-	p->drawLine(10,10,50,50);
+    p->setPen(QPen(Qt::red, 1, Qt::DashDotDotLine));
+    p->drawLine(10,10,50,50);
     } else if ( type == "scaleDashed-lines" ) {
-	p->scale(0.1,0.1);
-	p->setPen(QPen(Qt::red, 10, Qt::DashLine));
-	p->drawLine(10,10,500,500);
+    p->scale(0.1,0.1);
+    p->setPen(QPen(Qt::red, 10, Qt::DashLine));
+    p->drawLine(10,10,500,500);
     } else if ( type == "thick-dashed-lines" ) {
-	p->setPen(QPen(Qt::red, 10, Qt::DashLine));
-	p->drawLine(10,10,50,50);
+    p->setPen(QPen(Qt::red, 10, Qt::DashLine));
+    p->drawLine(10,10,50,50);
     } else if ( type == "negative-rect" ) {
-	p->drawRect(70, 0,-30,30);
+    p->drawRect(70, 0,-30,30);
     } else if ( type == "lightText" ) {
-	QFont f("Helvetica",12);
-	f.setWeight( QFont::Light );
-	p->setFont(f);
-	p->drawText(0,0,"Hello!");
+    QFont f("Helvetica",12);
+    f.setWeight( QFont::Light );
+    p->setFont(f);
+    p->drawText(0,0,"Hello!");
     } else if ( type == "boldText" ) {
-	QFont f("Helvetica",12);
-	f.setWeight( QFont::Bold );
-	p->setFont(f);
-	p->drawText(0,0,"Hello!");
+    QFont f("Helvetica",12);
+    f.setWeight( QFont::Bold );
+    p->setFont(f);
+    p->drawText(0,0,"Hello!");
     } else if ( type == "demiBoldText" ) {
-	QFont f("Helvetica",12);
-	f.setWeight( QFont::DemiBold );
-	p->setFont(f);
-	p->drawText(0,0,"Hello!");
+    QFont f("Helvetica",12);
+    f.setWeight( QFont::DemiBold );
+    p->setFont(f);
+    p->drawText(0,0,"Hello!");
     } else if ( type == "blackText" ) {
-	QFont f("Helvetica",12);
-	f.setWeight( QFont::Black );
-	p->setFont(f);
-	p->drawText(0,0,"Hello!");
+    QFont f("Helvetica",12);
+    f.setWeight( QFont::Black );
+    p->setFont(f);
+    p->drawText(0,0,"Hello!");
     } else if ( type == "task-20239" ) {
         p->translate(0,200);
-	p->scale(0.02,-0.02);
-	p->scale(1,-1);
-	for(int y = 1000; y <=10000; y += 2000) {
-	    QBrush br(Qt::green);
-	    QPalette palette(Qt::green,Qt::blue);
-	    qDrawShadePanel(p,4000,5000,4000,2000,palette.active(),false,200,&br);
-	    qDrawShadeRect(p,2000,2000,4000,2000,palette.active(),true,100,0,&br);
-	}
+    p->scale(0.02,-0.02);
+    p->scale(1,-1);
+    for(int y = 1000; y <=10000; y += 2000) {
+        QBrush br(Qt::green);
+        QPalette palette(Qt::green,Qt::blue);
+        qDrawShadePanel(p,4000,5000,4000,2000,palette.active(),false,200,&br);
+        qDrawShadeRect(p,2000,2000,4000,2000,palette.active(),true,100,0,&br);
+    }
     } else if (type=="clipRect") {
-	p->setClipRect(15,25,10,10);
-	p->drawEllipse(10,20,50,70);
+    p->setClipRect(15,25,10,10);
+    p->drawEllipse(10,20,50,70);
     } else if (type=="multipleClipRects") {
-	p->setClipRect(15,25,10,10);
-	p->drawEllipse(10,20,50,70);
-	p->setClipRect(100,200,20,20);
-	p->drawEllipse(110,220,50,70);
+    p->setClipRect(15,25,10,10);
+    p->drawEllipse(10,20,50,70);
+    p->setClipRect(100,200,20,20);
+    p->drawEllipse(110,220,50,70);
     } else if (type == "qsimplerichtext") {
-	p->setPen(QColor(0,0,0));
+    p->setPen(QColor(0,0,0));
         p->setBrush(Qt::NoBrush);
         QRect rect1(10, 10, 100, 50);
         QRect rect2(200, 20, 80, 50);

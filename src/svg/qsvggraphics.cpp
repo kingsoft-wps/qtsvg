@@ -70,6 +70,11 @@ QT_BEGIN_NAMESPACE
     }                                                       \
     p->setOpacity(oldOpacity);
 
+enum LengthType
+{
+    LT_INVALID = -1,
+    LT_EM = 7
+};
 
 static QSvgMarker *getMarker(const QString& id, QSvgNode *node)
 {
@@ -928,6 +933,7 @@ void QSvgText::resolveTspans(QPainter *p, QSvgExtraStates &states, qreal scale)
     if (!m_resolved) {
         QVector<qreal> coordX, coordY, offsetX, offsetY;
         for (QSvgTspan* child : m_tspans) {
+            child->updateOffsetY(p, states);
             processTspansCoords(child, coordX, coordY, offsetX, offsetY);
         }
         if (!m_paragraphs.empty() && m_paragraphs.last().endsWith(QChar(' ')))
@@ -1087,6 +1093,35 @@ void QSvgTspan::setCoordAndOffset(const QVector<qreal> &coordX, const QVector<qr
     m_coordY = coordY;
     m_offsetX = offsetX;
     m_offsetY = offsetY;
+}
+
+void QSvgTspan::setCoordAndOffsetType(const QVector<int> &coordXType, const QVector<int> &coordYType,
+                                      const QVector<int> &offsetXType, const QVector<int> &offsetYType)
+{
+    m_coordXType = coordXType;
+    m_coordYType = coordYType;
+    m_offsetXType = offsetXType;
+    m_offsetYType = offsetYType;
+}
+
+void QSvgTspan::updateOffsetY(QPainter *p, QSvgExtraStates &states)
+{
+    if (!p || m_offsetY.size() != m_offsetYType.size())
+        return;
+
+    applyStyle(p, states);
+
+    qreal fontSize = p->font().pointSize();
+    for (int i = 0; i < m_offsetY.size(); ++i)
+    {
+        if (m_offsetYType[i] == LT_EM)
+        {
+            m_offsetY[i] = m_offsetY[i] * fontSize;
+            m_offsetYType[i] = LT_INVALID;
+        }
+    }
+
+    revertStyle(p, states);
 }
 
 QSvgTspan::QSvgTspan(const QSvgTspan &other)

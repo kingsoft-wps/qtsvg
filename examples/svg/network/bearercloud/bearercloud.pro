@@ -9,7 +9,7 @@ RESOURCES = icons.qrc
 
 TARGET = bearercloud
 
-QT = core gui widgets network svg
+QT = core gui widgets network svg svgwidgets
 requires(qtConfig(bearermanagement))
 
 CONFIG += console

@@ -27,6 +27,7 @@
 ****************************************************************************/
 
 
+#include <QTemporaryDir>
 #include <QtTest/QtTest>
 
 #include <QDomDocument>
@@ -47,6 +48,9 @@ public:
     tst_QSvgGenerator();
     virtual ~tst_QSvgGenerator();
 
+public slots:
+    void initTestCase();
+
 private slots:
     void construction();
     void fileName();
@@ -59,6 +63,9 @@ private slots:
     void titleAndDescription();
     void gradientInterpolation();
     void patternBrush();
+
+private:
+    QTemporaryDir m_temporaryDir;
 };
 
 tst_QSvgGenerator::tst_QSvgGenerator()
@@ -67,9 +74,13 @@ tst_QSvgGenerator::tst_QSvgGenerator()
 
 tst_QSvgGenerator::~tst_QSvgGenerator()
 {
-    QFile::remove(QLatin1String("fileName_output.svg"));
-    QFile::remove(QLatin1String("outputDevice_output.svg"));
-    QFile::remove(QLatin1String("radial_gradient.svg"));
+}
+
+void tst_QSvgGenerator::initTestCase()
+{
+    QVERIFY2(m_temporaryDir.isValid(), qPrintable(m_temporaryDir.errorString()));
+    QString path = m_temporaryDir.path();
+    QVERIFY2(QDir::setCurrent(path), qPrintable("Could not chdir to " + path));
 }
 
 void tst_QSvgGenerator::construction()

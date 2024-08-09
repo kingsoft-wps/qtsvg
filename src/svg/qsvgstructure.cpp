@@ -426,7 +426,7 @@ void QSvgMarker::draw(QPainter *p, QSvgExtraStates &states, const QPointF& point
 
     p->save();
 
-    qreal scale = 0.0;
+    qreal scale = 1.0;
     if (m_viewBox.height() && m_viewBox.width())
         scale = qMin(m_size.height() / m_viewBox.height(), m_size.width() / m_viewBox.width());
    
@@ -435,7 +435,8 @@ void QSvgMarker::draw(QPainter *p, QSvgExtraStates &states, const QPointF& point
     p->scale(strokeWidth, strokeWidth);
     p->translate(-m_ref.x() * scale, -m_ref.y() * scale);
     p->scale(scale, scale);
-    p->setClipRect(m_viewBox, Qt::IntersectClip);
+    if (m_viewBox.isValid())
+        p->setClipRect(m_viewBox, Qt::IntersectClip);
 
     auto itr = m_renderers.cbegin();
     applyStyle(p, states);
@@ -600,8 +601,8 @@ void QSvgPattern::drawTile(QPainter *p, QSvgExtraStates &states)
     }
 
     applyStyle(p, states);
-	p->setRenderHint(QPainter::SmoothPixmapTransform, false);
-	p->setRenderHint(QPainter::HighQualityPixmapTransform, false);
+    p->setRenderHint(QPainter::SmoothPixmapTransform, false);
+    p->setRenderHint(QPainter::HighQualityPixmapTransform, false);
     p->setClipping(true);
     if (!m_clipPath.isEmpty()) {
         if (m_style.transform)

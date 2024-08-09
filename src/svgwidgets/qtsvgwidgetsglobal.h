@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 Intel Corporation.
+** Copyright (C) 2020 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the Qt SVG module of the Qt Toolkit.
@@ -37,22 +37,22 @@
 **
 ****************************************************************************/
 
-#ifndef QTSVGGLOBAL_H
-#define QTSVGGLOBAL_H
+#ifndef QTSVGWIDGETSGLOBAL_H
+#define QTSVGWIDGETSGLOBAL_H
 
 #include <QtCore/qglobal.h>
 
 QT_BEGIN_NAMESPACE
 
-#ifndef Q_SVG_EXPORT
+#ifndef Q_SVGWIDGETS_EXPORT
 #  ifndef QT_STATIC
-#    if defined(QT_BUILD_SVG_LIB)
-#      define Q_SVG_EXPORT Q_DECL_EXPORT
+#    if defined(QT_BUILD_SVGWIDGETS_LIB)
+#      define Q_SVGWIDGETS_EXPORT Q_DECL_EXPORT
 #    else
-#      define Q_SVG_EXPORT Q_DECL_IMPORT
+#      define Q_SVGWIDGETS_EXPORT Q_DECL_IMPORT
 #    endif
 #  else
-#    define Q_SVG_EXPORT
+#    define Q_SVGWIDGETS_EXPORT
 #  endif
 #endif
 

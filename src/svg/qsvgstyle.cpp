@@ -565,14 +565,20 @@ void QSvgClipPathStyle::apply(QPainter *p, const QSvgNode *, QSvgExtraStates &)
     if (nullptr != m_clipNode) 
     {
         m_oldPath = p->clipPath();
+        m_oldEnabled = p->hasClipping();
         p->setClipPath(m_currePath, Qt::IntersectClip);
     }
 }
 
 void QSvgClipPathStyle::revert(QPainter *p, QSvgExtraStates &) 
 {
-    if (nullptr != m_clipNode)
+    if (nullptr != m_clipNode) {
+        if (!m_oldEnabled) {
+            p->setClipping(false);
+            return;
+        }
         p->setClipPath(m_oldPath, Qt::ReplaceClip);
+    }
 }
 
 QSvgStyleProperty::Type QSvgClipPathStyle::type() const 

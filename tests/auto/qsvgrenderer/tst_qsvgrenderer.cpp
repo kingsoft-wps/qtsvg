@@ -38,10 +38,6 @@
 #include <QPicture>
 #include <QXmlStreamReader>
 
-#ifndef SRCDIR
-#define SRCDIR
-#endif
-
 class tst_QSvgRenderer : public QObject
 {
 Q_OBJECT
@@ -449,10 +445,10 @@ static bool diffIsSmallEnough(double diff, double norm)
     return diff <= 1e-12 * norm;
 }
 
-static inline bool diffIsSmallEnough(float diff, float norm)
-{
-    return diff <= 1e-5 * norm;
-}
+// static inline bool diffIsSmallEnough(float diff, float norm)
+// {
+//     return diff <= 1e-5 * norm;
+// }
 
 static void compareTransforms(const QTransform &m1, const QTransform &m2)
 {
@@ -720,13 +716,13 @@ void tst_QSvgRenderer::recursiveRefs()
 #ifndef QT_NO_COMPRESS
 void tst_QSvgRenderer::testGzLoading()
 {
-    QSvgRenderer renderer(QLatin1String(SRCDIR "heart.svgz"));
+    QSvgRenderer renderer(QFINDTESTDATA("heart.svgz"));
     QVERIFY(renderer.isValid());
 
     QSvgRenderer resourceRenderer(QLatin1String(":/heart.svgz"));
     QVERIFY(resourceRenderer.isValid());
 
-    QFile largeFileGz(SRCDIR "large.svgz");
+    QFile largeFileGz(QFINDTESTDATA("large.svgz"));
     largeFileGz.open(QIODevice::ReadOnly);
     QByteArray data = largeFileGz.readAll();
     QSvgRenderer autoDetectGzData(data);

@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 Intel Corporation.
+** Copyright (C) 2016 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of the Qt SVG module of the Qt Toolkit.
@@ -37,25 +37,41 @@
 **
 ****************************************************************************/
 
-#ifndef QTSVGGLOBAL_H
-#define QTSVGGLOBAL_H
+#ifndef QSVGWIDGET_H
+#define QSVGWIDGET_H
 
-#include <QtCore/qglobal.h>
+#include <QtSvgWidgets/qtsvgwidgetsglobal.h>
+#include <QtWidgets/qwidget.h>
 
 QT_BEGIN_NAMESPACE
 
-#ifndef Q_SVG_EXPORT
-#  ifndef QT_STATIC
-#    if defined(QT_BUILD_SVG_LIB)
-#      define Q_SVG_EXPORT Q_DECL_EXPORT
-#    else
-#      define Q_SVG_EXPORT Q_DECL_IMPORT
-#    endif
-#  else
-#    define Q_SVG_EXPORT
-#  endif
-#endif
+
+class QSvgWidgetPrivate;
+class QPaintEvent;
+class QSvgRenderer;
+
+class Q_SVGWIDGETS_EXPORT QSvgWidget : public QWidget
+{
+    Q_OBJECT
+public:
+    QSvgWidget(QWidget *parent = nullptr);
+    QSvgWidget(const QString &file, QWidget *parent = nullptr);
+    ~QSvgWidget();
+
+    QSvgRenderer *renderer() const;
+
+    QSize sizeHint() const override;
+public Q_SLOTS:
+    void load(const QString &file);
+    void load(const QByteArray &contents);
+protected:
+    void paintEvent(QPaintEvent *event) override;
+private:
+    Q_DISABLE_COPY(QSvgWidget)
+    Q_DECLARE_PRIVATE(QSvgWidget)
+};
 
 QT_END_NAMESPACE
 
-#endif
+
+#endif // QSVGWIDGET_H

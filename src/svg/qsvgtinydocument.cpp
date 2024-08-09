@@ -49,6 +49,9 @@
 #include "qqueue.h"
 #include "qstack.h"
 #include "qdebug.h"
+#if defined(Q_OS_ANDROID)
+#include "qscopedvaluerollback.h"
+#endif
 
 #ifndef QT_NO_COMPRESS
 #include <zlib.h>
@@ -337,10 +340,12 @@ QSvgTinyDocument::load(const QString &fileName,
     }
 
 #ifndef QT_NO_COMPRESS
+#ifdef QT_BUILD_INTERNAL
     if (fileName.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive)
         || fileName.endsWith(QLatin1String(".svg.gz"), Qt::CaseInsensitive)) {
         return load(qt_inflateGZipDataFrom(&file));
     }
+#endif
 #endif
 
     QSvgTinyDocument *doc = 0;

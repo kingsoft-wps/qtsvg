@@ -1,6 +1,5 @@
 TARGET     = QtSvg
 QT         = core-private gui-private
-qtHaveModule(widgets): QT += widgets-private
 
 DEFINES   += QT_NO_USING_NAMESPACE
 msvc:equals(QT_ARCH, i386): QMAKE_LFLAGS += /BASE:0x66000000
@@ -18,8 +17,6 @@ HEADERS += \
     qsvgfont_p.h            \
     qsvgtinydocument_p.h    \
     qsvgrenderer.h          \
-    qsvgwidget.h            \
-    qgraphicssvgitem.h      \
     qsvggenerator.h \
     qtsvgglobal.h
 
@@ -34,8 +31,6 @@ SOURCES += \
     qsvgfont.cpp            \
     qsvgtinydocument.cpp    \
     qsvgrenderer.cpp        \
-    qsvgwidget.cpp          \
-    qgraphicssvgitem.cpp    \
     qsvggenerator.cpp
 
 qtConfig(system-zlib): \

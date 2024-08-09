@@ -53,6 +53,7 @@
 #include "qbuffer.h"
 #include "qmath.h"
 #include "qbitmap.h"
+#include "qcryptographichash.h"
 
 #include "qdebug.h"
 
@@ -92,6 +93,10 @@ public:
         viewBox = QRectF();
         outputDevice = 0;
         resolution = 72;
+        clipPathEnabled = false;
+        textCoordEnabled = false;
+        trimEmptyGroupEnabled = false;
+        dataPrefix = "";
 
         attributes.document_title = QLatin1String("Qt SVG Document");
         attributes.document_description = QLatin1String("Generated with Qt");
@@ -101,33 +106,62 @@ public:
         attributes.font_weight = QLatin1String("normal");
 
         afterFirstUpdate = false;
+        discardStashStream = false;
         numGradients = 0;
+        numClipPaths = 0;
     }
 
     QSize size;
     QRectF viewBox;
     QIODevice *outputDevice;
     QTextStream *stream;
+    QScopedPointer<QTextStream> stashStream;
     int resolution;
+    bool clipPathEnabled;
+    bool textCoordEnabled;
+    bool trimEmptyGroupEnabled;
+    QString dataPrefix;
 
     QString header;
     QString defs;
     QString body;
     bool    afterFirstUpdate;
+    bool    discardStashStream;
+    QString stashContent;
 
     QBrush brush;
     QPen pen;
     QMatrix matrix;
     QFont font;
+    QPainterPath clipPath;
+    QMatrix matrixClipPath; // the matrix when calc clipPath.
 
-    QString generateGradientName() {
+    QString generateGradientName(const QString &prefix) {
         ++numGradients;
-        currentGradientName = QString::fromLatin1("gradient%1").arg(numGradients);
+        currentGradientName = prefix + QString::fromLatin1("gradient%1").arg(numGradients);
         return currentGradientName;
     }
 
     QString currentGradientName;
     int numGradients;
+
+    bool getClipPathId(QString &id) {
+        QRectF rect = clipPath.boundingRect();
+        QVector<qreal> hashKey = {rect.x(), rect.y(), rect.width(), rect.height()};
+        auto &vector = clipPathCache[hashKey];
+        for (const auto p : vector) {
+            if (clipPath == p.first) {
+                id = p.second;
+                return false;
+            }
+        }
+        id = QString::fromLatin1("clipPath%1_%2").arg(dataPrefix).arg(++numClipPaths);
+        vector.push_back(qMakePair(clipPath, id));
+        return true;
+    }
+
+    int numClipPaths;
+    QHash<QVector<qreal>, QVector<QPair<QPainterPath, QString>>> clipPathCache;
 
     QStringList savedPatternBrushes;
     QStringList savedPatternMasks;
@@ -218,6 +252,61 @@ public:
         d_func()->resolution = resolution;
     }
 
+    bool clipPathEnabled() { return d_func()->clipPathEnabled; }
+    void setClipPathEnabled(bool enable) {
+        Q_ASSERT(!isActive());
+        d_func()->clipPathEnabled = enable;
+    }
+
+    bool textCoordEnabled() { return d_func()->textCoordEnabled; }
+    void setTextCoordEnabled(bool enable) {
+        Q_ASSERT(!isActive());
+        d_func()->textCoordEnabled = enable;
+    }
+
+    bool trimEmptyGroupEnabled() { return d_func()->trimEmptyGroupEnabled; }
+    void setTrimEmptyGroupEnabled(bool enable) {
+        Q_ASSERT(!isActive());
+        d_func()->trimEmptyGroupEnabled = enable;
+    }
+
+    QString dataPrefix() { return d_func()->dataPrefix; }
+    void setDataPrefix(const QString prefix) {
+        Q_ASSERT(!isActive());
+        d_func()->dataPrefix = prefix;
+    }
+
+    void beginGroup(const QMap<QString, QString> *attrs)
+    {
+        Q_D(QSvgPaintEngine);
+        if (d->afterFirstUpdate && !d->discardStashStream)
+        {
+            *d->stream << "</g>\n\n";
+            d->afterFirstUpdate = false;
+        }
+        *d->stream << "<g ";
+        if (attrs)
+        {
+            for (auto it = attrs->begin(); it != attrs->end(); ++it)
+            {
+                *d->stream << it.key() << '=' << it.value() << ' ';
+            }
+        }
+        *d->stream << '>' << endl;
+    }
+
+    void endGroup()
+    {
+        Q_D(QSvgPaintEngine);
+        if (d->afterFirstUpdate && !d->discardStashStream)
+        {
+            *d->stream << "</g>\n\n";
+            d->afterFirstUpdate = false;
+        }
+
+        *d->stream << "</g>" << endl;
+    }
+
     QString savePatternMask(Qt::BrushStyle style)
     {
         QString maskId = QString(QStringLiteral("patternmask%1")).arg(style);
@@ -251,6 +340,67 @@ public:
         return patternId;
     }
 
+    QString saveTexturePatternBrush(int x, int y, const QBrush &brush)
+    {
+        QImage img = brush.textureImage();
+        if (img.isNull())
+            return QString();
+
+        QSize szImg = img.size();
+        if (szImg.width() <= 0 || szImg.height() <= 0)
+            return QString();
+
+        QTransform trans = brush.transform();
+        if (trans.isScaling()) {
+            szImg.setWidth(qRound(szImg.width() * trans.m11()));
+            szImg.setHeight(qRound(szImg.height() * trans.m22()));
+        }
+
+        if (x < 0 || x >= szImg.width()) {
+            x = (x - x / szImg.width() * szImg.width() + szImg.width()) % szImg.width();
+        }
+        if (y < 0 || y >= szImg.height()) {
+            y = (y - y / szImg.height() * szImg.height() + szImg.height()) % szImg.height();
+        }
+
+        QByteArray data;
+        QBuffer buffer(&data);
+        buffer.open(QBuffer::ReadWrite);
+        img.save(&buffer, "PNG");
+        buffer.close();
+
+        QCryptographicHash hash(QCryptographicHash::Md5);
+        hash.addData(data.toBase64());
+        QString imgMd5 = hash.result().toHex();
+
+        QString patternId = QString(QStringLiteral("filltexturepattern%1_%2_%3_%4_%5"))
+                                    .arg(imgMd5)
+                                    .arg(x)
+                                    .arg(y)
+                                    .arg(szImg.width())
+                                    .arg(szImg.height());
+        if (!d_func()->savedPatternBrushes.contains(patternId)) {
+            QTextStream str(&d_func()->defs, QIODevice::Append);
+            str << QString(QStringLiteral("<pattern id=\"%1\" x=\"%2\" y=\"%3\" width=\"%4\" height=\"%5\" patternUnits=\"userSpaceOnUse\">"))
+                            .arg(patternId)
+                            .arg(x)
+                            .arg(y)
+                            .arg(szImg.width())
+                            .arg(szImg.height())
+                << endl;
+            str << QString(QStringLiteral("<image "));
+            str << QString(QStringLiteral("width=\"%1\" height=\"%2\" preserveAspectRatio=\"none\" "))
+                            .arg(szImg.width())
+                            .arg(szImg.height());
+            str << QString(QStringLiteral("xlink:href=\"data:image/png;base64,")) << data.toBase64()
+                << QString(QStringLiteral("\"/>")) << endl;
+            str << QStringLiteral("</pattern>") << endl << endl;
+            d_func()->savedPatternBrushes.append(patternId);
+        }
+
+        return patternId;
+    }
+
     void saveLinearGradientBrush(const QGradient *g)
     {
         QTextStream str(&d_func()->defs, QIODevice::Append);
@@ -264,7 +414,7 @@ public:
                 << QLatin1String("y2=\"") <<grad->finalStop().y() << QLatin1String("\" ");
         }
 
-        str << QLatin1String("id=\"") << d_func()->generateGradientName() << QLatin1String("\">\n");
+        str << QLatin1String("id=\"") << d_func()->generateGradientName(dataPrefix())<< QLatin1String("\">\n");
         saveGradientStops(str, g);
         str << QLatin1String("</linearGradient>") <<endl;
     }
@@ -281,7 +431,7 @@ public:
                 << QLatin1String("fx=\"") <<grad->focalPoint().x() << QLatin1String("\" ")
                 << QLatin1String("fy=\"") <<grad->focalPoint().y() << QLatin1String("\" ");
         }
-        str << QLatin1String("id=\"") <<d_func()->generateGradientName()<< QLatin1String("\">\n");
+        str << QLatin1String("id=\"") <<d_func()->generateGradientName(dataPrefix())<< QLatin1String("\">\n");
         saveGradientStops(str, g);
         str << QLatin1String("</radialGradient>") << endl;
     }
@@ -341,6 +491,64 @@ public:
         str << QLatin1String("\" ");
     }
 
+    QString getClipPathId(const QPaintEngineState &state)
+    {
+        QString id;
+        bool bClipEnabled = state.isClipEnabled() && state.painter()->hasClipping();
+        if (bClipEnabled && state.clipOperation() == Qt::NoClip)
+            bClipEnabled = false;
+        if (!bClipEnabled)
+            return id;
+
+        bool bUnsavedClipPath = d_func()->getClipPathId(id);
+        if (bUnsavedClipPath)
+            saveClipPath(id);
+        return id;
+    }
+
+    void saveClipPath(QString &id)
+    {
+        QTextStream str(&d_func()->defs, QIODevice::Append);
+        str << QLatin1String("<clipPath ");
+        str << QLatin1String("id=\"") << id << QLatin1String("\">\n");
+        const QPainterPath &p = d_func()->clipPath;
+        str << "<path d=\"";
+
+        for (int i=0; i<p.elementCount(); ++i) {
+            const QPainterPath::Element &e = p.elementAt(i);
+            switch (e.type) {
+            case QPainterPath::MoveToElement:
+                str << 'M' << e.x << ',' << e.y;
+                break;
+            case QPainterPath::LineToElement:
+                str << 'L' << e.x << ',' << e.y;
+                break;
+            case QPainterPath::CurveToElement:
+                str << 'C' << e.x << ',' << e.y;
+                ++i;
+                while (i < p.elementCount()) {
+                    const QPainterPath::Element &e = p.elementAt(i);
+                    if (e.type != QPainterPath::CurveToDataElement) {
+                        --i;
+                        break;
+                    } else
+                        str << ' ';
+                    str << e.x << ',' << e.y;
+                    ++i;
+                }
+                break;
+            default:
+                break;
+            }
+            if (i != p.elementCount() - 1) {
+                str << ' ';
+            }
+        }
+
+        str << "\"/>" << endl;
+        str << QLatin1String("</clipPath>") << endl;
+    }
+
     void generateQtDefaults()
     {
         *d_func()->stream << QLatin1String("fill=\"none\" ");
@@ -351,11 +559,28 @@ public:
         *d_func()->stream << QLatin1String("stroke-linejoin=\"bevel\" ");
         *d_func()->stream << QLatin1String(">\n");
     }
+
     inline QTextStream &stream()
     {
+        if (trimEmptyGroupEnabled() && d_func()->discardStashStream)
+            return stashStream();
+
         return *d_func()->stream;
     }
 
+    inline QTextStream &stashStream()
+    {
+        return *d_func()->stashStream.get();
+    }
+
+    inline void holdStashStream()
+    {
+        if (!trimEmptyGroupEnabled())
+            return;
+
+        *d_func()->stream << stashStream().readAll();
+        d_func()->discardStashStream = false;
+    }
 
     void qpenToSvg(const QPen &spen)
     {
@@ -510,6 +735,125 @@ public:
            break;
         }
     }
+    QString qFontNameTranslate(QString fontName)
+    {
+        static QHash<QString, QString> s_FontFamilyMap = {
+            std::make_pair(QString::fromWCharArray(L"宋体"), QLatin1String("SimSun")),
+            std::make_pair(QString::fromWCharArray(L"黑体"), QLatin1String("SimHei")),
+            std::make_pair(QString::fromWCharArray(L"微软雅黑"), QLatin1String("Microsoft Yahei")),
+            std::make_pair(QString::fromWCharArray(L"微软正黑体"), QLatin1String("Microsoft JhengHei")),
+            std::make_pair(QString::fromWCharArray(L"楷体"), QLatin1String("KaiTi")),
+            std::make_pair(QString::fromWCharArray(L"新宋体"), QLatin1String("NSimSun")),
+            std::make_pair(QString::fromWCharArray(L"仿宋"), QLatin1String("FangSong")),
+            std::make_pair(QString::fromWCharArray(L"苹方"), QLatin1String("PingFang SC")),
+            std::make_pair(QString::fromWCharArray(L"华文黑体"), QLatin1String("STHeiti")),
+            std::make_pair(QString::fromWCharArray(L"华文楷体"), QLatin1String("STKaiti")),
+            std::make_pair(QString::fromWCharArray(L"华文宋体"), QLatin1String("STSong")),
+            std::make_pair(QString::fromWCharArray(L"华文仿宋"), QLatin1String("STFangsong")),
+            std::make_pair(QString::fromWCharArray(L"华文中宋"), QLatin1String("STZhongsong")),
+            std::make_pair(QString::fromWCharArray(L"华文琥珀"), QLatin1String("STHupo")),
+            std::make_pair(QString::fromWCharArray(L"华文新魏"), QLatin1String("STXinwei")),
+            std::make_pair(QString::fromWCharArray(L"华文隶书"), QLatin1String("STLiti")),
+            std::make_pair(QString::fromWCharArray(L"华文行楷"), QLatin1String("STXingkai")),
+            std::make_pair(QString::fromWCharArray(L"冬青黑体简"), QLatin1String("Hiragino Sans GB")),
+            std::make_pair(QString::fromWCharArray(L"兰亭黑-简"), QLatin1String("Lantinghei SC")),
+            std::make_pair(QString::fromWCharArray(L"翩翩体-简"), QLatin1String("Hanzipen SC")),
+            std::make_pair(QString::fromWCharArray(L"手札体-简"), QLatin1String("Hannotate SC")),
+            std::make_pair(QString::fromWCharArray(L"宋体-简"), QLatin1String("Songti SC")),
+            std::make_pair(QString::fromWCharArray(L"娃娃体-简"), QLatin1String("Wawati SC")),
+            std::make_pair(QString::fromWCharArray(L"魏碑-简"), QLatin1String("Weibei SC")),
+            std::make_pair(QString::fromWCharArray(L"行楷-简"), QLatin1String("Xingkai SC")),
+            std::make_pair(QString::fromWCharArray(L"雅痞-简"), QLatin1String("Yapi SC")),
+            std::make_pair(QString::fromWCharArray(L"圆体-简"), QLatin1String("Yuanti SC")),
+            std::make_pair(QString::fromWCharArray(L"幼圆"), QLatin1String("YouYuan")),
+            std::make_pair(QString::fromWCharArray(L"隶书"), QLatin1String("LiSu")),
+            std::make_pair(QString::fromWCharArray(L"华文细黑"), QLatin1String("STXihei")),
+            std::make_pair(QString::fromWCharArray(L"华文彩云"), QLatin1String("STCaiyun")),
+            std::make_pair(QString::fromWCharArray(L"方正舒体"), QLatin1String("FZShuTi")),
+            std::make_pair(QString::fromWCharArray(L"方正姚体"), QLatin1String("FZYaoti")),
+            std::make_pair(QString::fromWCharArray(L"思源黑体"), QLatin1String("Source Han Sans CN")),
+            std::make_pair(QString::fromWCharArray(L"思源宋体"), QLatin1String("Source Han Serif SC")),
+            std::make_pair(QString::fromWCharArray(L"文泉驿微米黑"), QLatin1String("WenQuanYi Micro Hei")),
+            std::make_pair(QString::fromWCharArray(L"汉仪旗黑"), QLatin1String("HYQihei 40S")),
+            std::make_pair(QString::fromWCharArray(L"汉仪大宋简"), QLatin1String("HYDaSongJ")),
+            std::make_pair(QString::fromWCharArray(L"汉仪楷体"), QLatin1String("HYKaiti")),
+            std::make_pair(QString::fromWCharArray(L"汉仪家书简"), QLatin1String("HYJiaShuJ")),
+            std::make_pair(QString::fromWCharArray(L"汉仪PP体简"), QLatin1String("HYPPTiJ")),
+            std::make_pair(QString::fromWCharArray(L"汉仪乐喵体简"), QLatin1String("HYLeMiaoTi")),
+            std::make_pair(QString::fromWCharArray(L"汉仪小麦体"), QLatin1String("HYXiaoMaiTiJ")),
+            std::make_pair(QString::fromWCharArray(L"汉仪程行体"), QLatin1String("HYChengXingJ")),
+            std::make_pair(QString::fromWCharArray(L"汉仪黑荔枝"), QLatin1String("HYHeiLiZhiTiJ")),
+            std::make_pair(QString::fromWCharArray(L"汉仪雅酷黑W"), QLatin1String("HYYaKuHeiW")),
+            std::make_pair(QString::fromWCharArray(L"汉仪大黑简"), QLatin1String("HYDaHeiJ")),
+            std::make_pair(QString::fromWCharArray(L"汉仪尚魏手书W"), QLatin1String("HYShangWeiShouShuW")),
+            std::make_pair(QString::fromWCharArray(L"方正粗雅宋简体"), QLatin1String("FZYaSongS-B-GB")),
+            std::make_pair(QString::fromWCharArray(L"方正报宋简体"), QLatin1String("FZBaoSong-Z04S")),
+            std::make_pair(QString::fromWCharArray(L"方正粗圆简体"), QLatin1String("FZCuYuan-M03S")),
+            std::make_pair(QString::fromWCharArray(L"方正大标宋简体"), QLatin1String("FZDaBiaoSong-B06S")),
+            std::make_pair(QString::fromWCharArray(L"方正大黑简体"), QLatin1String("FZDaHei-B02S")),
+            std::make_pair(QString::fromWCharArray(L"方正仿宋简体"), QLatin1String("FZFangSong-Z02S")),
+            std::make_pair(QString::fromWCharArray(L"方正黑体简体"), QLatin1String("FZHei-B01S")),
+            std::make_pair(QString::fromWCharArray(L"方正琥珀简体"), QLatin1String("FZHuPo-M04S")),
+            std::make_pair(QString::fromWCharArray(L"方正楷体简体"), QLatin1String("FZKai-Z03S")),
+            std::make_pair(QString::fromWCharArray(L"方正隶变简体"), QLatin1String("FZLiBian-S02S")),
+            std::make_pair(QString::fromWCharArray(L"方正隶书简体"), QLatin1String("FZLiShu-S01S")),
+            std::make_pair(QString::fromWCharArray(L"方正美黑简体"), QLatin1String("FZMeiHei-M07S")),
+            std::make_pair(QString::fromWCharArray(L"方正书宋简体"), QLatin1String("FZShuSong-Z01S")),
+            std::make_pair(QString::fromWCharArray(L"方正舒体简体"), QLatin1String("FZShuTi-S05S")),
+            std::make_pair(QString::fromWCharArray(L"方正水柱简体"), QLatin1String("FZShuiZhu-M08S")),
+            std::make_pair(QString::fromWCharArray(L"方正宋黑简体"), QLatin1String("FZSongHei-B07S")),
+            std::make_pair(QString::fromWCharArray(L"方正宋三简体"), QLatin1String("FZSong")),
+            std::make_pair(QString::fromWCharArray(L"方正魏碑简体"), QLatin1String("FZWeiBei-S03S")),
+            std::make_pair(QString::fromWCharArray(L"方正细等线简体"), QLatin1String("FZXiDengXian-Z06S")),
+            std::make_pair(QString::fromWCharArray(L"方正细黑一简体"), QLatin1String("FZXiHei I-Z08S")),
+            std::make_pair(QString::fromWCharArray(L"方正细圆简体"), QLatin1String("FZXiYuan-M01S")),
+            std::make_pair(QString::fromWCharArray(L"方正小标宋简体"), QLatin1String("FZXiaoBiaoSong-B05S")),
+            std::make_pair(QString::fromWCharArray(L"方正行楷简体"), QLatin1String("FZXingKai-S04S")),
+            std::make_pair(QString::fromWCharArray(L"方正姚体简体"), QLatin1String("FZYaoTi-M06S")),
+            std::make_pair(QString::fromWCharArray(L"方正中等线简体"), QLatin1String("FZZhongDengXian-Z07S")),
+            std::make_pair(QString::fromWCharArray(L"方正准圆简体"), QLatin1String("FZZhunYuan-M02S")),
+            std::make_pair(QString::fromWCharArray(L"方正综艺简体"), QLatin1String("FZZongYi-M05S")),
+            std::make_pair(QString::fromWCharArray(L"方正彩云简体"), QLatin1String("FZCaiYun-M09S")),
+            std::make_pair(QString::fromWCharArray(L"方正隶二简体"), QLatin1String("FZLiShu II-S06S")),
+            std::make_pair(QString::fromWCharArray(L"方正康体简体"), QLatin1String("FZKangTi-S07S")),
+            std::make_pair(QString::fromWCharArray(L"方正超粗黑简体"), QLatin1String("FZChaoCuHei-M10S")),
+            std::make_pair(QString::fromWCharArray(L"方正新报宋简体"), QLatin1String("FZNew BaoSong-Z12S")),
+            std::make_pair(QString::fromWCharArray(L"方正新舒体简体"), QLatin1String("FZNew ShuTi-S08S")),
+            std::make_pair(QString::fromWCharArray(L"方正黄草简体"), QLatin1String("FZHuangCao-S09S")),
+            std::make_pair(QString::fromWCharArray(L"方正少儿简体"), QLatin1String("FZShaoEr-M11S")),
+            std::make_pair(QString::fromWCharArray(L"方正稚艺简体"), QLatin1String("FZZhiYi-M12S")),
+            std::make_pair(QString::fromWCharArray(L"方正细珊瑚简体"), QLatin1String("FZXiShanHu-M13S")),
+            std::make_pair(QString::fromWCharArray(L"方正粗宋简体"), QLatin1String("FZCuSong-B09S")),
+            std::make_pair(QString::fromWCharArray(L"方正平和简体"), QLatin1String("FZPingHe-S11S")),
+            std::make_pair(QString::fromWCharArray(L"方正华隶简体"), QLatin1String("FZHuaLi-M14S")),
+            std::make_pair(QString::fromWCharArray(L"方正瘦金书简体"), QLatin1String("FZShouJinShu-S10S")),
+            std::make_pair(QString::fromWCharArray(L"方正细倩简体"), QLatin1String("FZXiQian-M15S")),
+            std::make_pair(QString::fromWCharArray(L"方正中倩简体"), QLatin1String("FZZhongQian-M16S")),
+            std::make_pair(QString::fromWCharArray(L"方正粗倩简体"), QLatin1String("FZCuQian-M17S")),
+            std::make_pair(QString::fromWCharArray(L"方正胖娃简体"), QLatin1String("FZPangWa-M18S")),
+            std::make_pair(QString::fromWCharArray(L"方正宋一简体"), QLatin1String("FZSongYi-Z13S")),
+            std::make_pair(QString::fromWCharArray(L"方正剪纸简体"), QLatin1String("FZJianZhi-M23S")),
+            std::make_pair(QString::fromWCharArray(L"方正流行体简体"), QLatin1String("FZLiuXingTi-M26S")),
+            std::make_pair(QString::fromWCharArray(L"方正祥隶简体"), QLatin1String("FZXiangLi-S17S")),
+            std::make_pair(QString::fromWCharArray(L"方正粗活意简体"), QLatin1String("FZCuHuoYi-M25S")),
+            std::make_pair(QString::fromWCharArray(L"方正胖头鱼简体"), QLatin1String("FZPangTouYu-M24S")),
+            std::make_pair(QString::fromWCharArray(L"方正卡通简体"), QLatin1String("FZKaTong-M19S")),
+            std::make_pair(QString::fromWCharArray(L"方正艺黑简体"), QLatin1String("FZYiHei-M20S")),
+            std::make_pair(QString::fromWCharArray(L"方正水黑简体"), QLatin1String("FZShuiHei-M21S")),
+            std::make_pair(QString::fromWCharArray(L"方正古隶简体"), QLatin1String("FZGuLi-S12S")),
+            std::make_pair(QString::fromWCharArray(L"方正幼线简体"), QLatin1String("FZYouXian-Z09S")),
+            std::make_pair(QString::fromWCharArray(L"方正启体简体"), QLatin1String("FZQiTi-S14S")),
+            std::make_pair(QString::fromWCharArray(L"方正小篆体"), QLatin1String("FZXiaoZhuanTi-S13T")),
+            std::make_pair(QString::fromWCharArray(L"方正硬笔楷书简体"), QLatin1String("FZYingBiKaiShu-S15S")),
+            std::make_pair(QString::fromWCharArray(L"方正毡笔黑简体"), QLatin1String("FZZhanBiHei-M22S")),
+            std::make_pair(QString::fromWCharArray(L"方正硬笔行书简体"), QLatin1String("FZYingBiXingShu-S16S")),
+        };
+
+        if (s_FontFamilyMap.contains(fontName))
+            return s_FontFamilyMap[fontName];
+
+        return QString();
+    }
     void qfontToSvg(const QFont &sfont)
     {
         Q_D(QSvgPaintEngine);
@@ -537,14 +881,25 @@ public:
         }
 
         d->attributes.font_weight = QString::number(svgWeight);
-        d->attributes.font_family = d->font.family();
         d->attributes.font_style = d->font.italic() ? QLatin1String("italic") : QLatin1String("normal");
 
-        *d->stream << "font-family=\"" << d->attributes.font_family << "\" "
+        QString fontName = d->font.family();
+        QString translatedFontName = qFontNameTranslate(fontName);
+        if (!translatedFontName.isEmpty())
+            fontName += "," + translatedFontName;
+        d->attributes.font_family = fontName.toHtmlEscaped();
+
+        stream() << "font-family=\"" << d->attributes.font_family << "\" "
                       "font-size=\"" << d->attributes.font_size << "\" "
                       "font-weight=\"" << d->attributes.font_weight << "\" "
                       "font-style=\"" << d->attributes.font_style << "\" "
                    << endl;
+    }
+    void appendTransformToSvg(qreal x, qreal y, qreal w, qreal h, qreal angle)
+    {
+        qreal midx = qRound(x + w / 2);
+        qreal midy = qRound(y - h / 2);
+        stream() << QString(QStringLiteral("transform=\"translate(%1, %2) rotate(%3) translate(-%1, -%2)\"")).arg(midx).arg(midy).arg(angle) << endl;
     }
 };
 
@@ -817,6 +1172,67 @@ void QSvgGenerator::setResolution(int dpi)
     d->engine->setResolution(dpi);
 }
 
+bool QSvgGenerator::clipPathEnabled() const
+{
+    Q_D(const QSvgGenerator);
+    return d->engine->clipPathEnabled();
+}
+
+void QSvgGenerator::setClipPathEnabled(bool enable)
+{
+    Q_D(QSvgGenerator);
+    d->engine->setClipPathEnabled(enable);
+}
+
+bool QSvgGenerator::textCoordEnabled() const
+{
+    Q_D(const QSvgGenerator);
+    return d->engine->textCoordEnabled();
+}
+
+void QSvgGenerator::setTextCoordEnabled(bool enable)
+{
+    Q_D(QSvgGenerator);
+    d->engine->setTextCoordEnabled(enable);
+}
+
+bool QSvgGenerator::trimEmptyGroupEnabled() const
+{
+    Q_D(const QSvgGenerator);
+    return d->engine->trimEmptyGroupEnabled();
+}
+
+void QSvgGenerator::setTrimEmptyGroupEnabled(bool enable)
+{
+    Q_D(QSvgGenerator);
+    d->engine->setTrimEmptyGroupEnabled(enable);
+}
+
+QString QSvgGenerator::dataPrefix() const
+{
+    Q_D(const QSvgGenerator);
+    return d->engine->dataPrefix();
+}
+
+void QSvgGenerator::setDataPrefix(const QString& prefix)
+{
+    Q_D(QSvgGenerator);
+    d->engine->setDataPrefix(prefix);
+}
+
+void QSvgGenerator::beginGroup(const QMap<QString, QString> *attrs)
+{
+    Q_D(QSvgGenerator);
+    d->engine->beginGroup(attrs);
+}
+
+void QSvgGenerator::endGroup()
+{
+    Q_D(QSvgGenerator);
+    d->engine->endGroup();
+
+}
+
 /*!
     Returns the paint engine used to render graphics to be converted to SVG
     format information.
@@ -890,6 +1306,8 @@ bool QSvgPaintEngine::begin(QPaintDevice *)
     }
 
     d->stream = new QTextStream(&d->header);
+    if (trimEmptyGroupEnabled())
+        d->stashStream.reset(new QTextStream(&d->stashContent));
 
     // stream out the header...
     *d->stream << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>" << endl << "<svg";
@@ -944,7 +1362,7 @@ bool QSvgPaintEngine::end()
     *d->stream << d->header;
     *d->stream << d->defs;
     *d->stream << d->body;
-    if (d->afterFirstUpdate)
+    if (d->afterFirstUpdate && !d->discardStashStream)
         *d->stream << "</g>" << endl; // close the updateState
 
     *d->stream << "</g>" << endl // close the Qt defaults
@@ -967,8 +1385,22 @@ void QSvgPaintEngine::drawImage(const QRectF &r, const QImage &image,
 {
     //Q_D(QSvgPaintEngine);
 
-    Q_UNUSED(sr);
     Q_UNUSED(flags);
+
+    holdStashStream();
+
+    QRectF baseSize(0, 0, image.width(), image.height());
+    QImage im = image;
+    if (baseSize != sr)
+        im = im.copy(sr.toAlignedRect());
+
+    if (im.isNull())
+        return;
+
+    QString shapeInfo = image.text("shapeInfo");
+    if (!shapeInfo.isEmpty())
+        stream() << "<g id=\"wo_shape\" data-description=\"shapeInfo_"<<shapeInfo<<"\">";
+
     stream() << "<image ";
     stream() << "x=\""<<r.x()<<"\" "
                 "y=\""<<r.y()<<"\" "
@@ -979,11 +1411,14 @@ void QSvgPaintEngine::drawImage(const QRectF &r, const QImage &image,
     QByteArray data;
     QBuffer buffer(&data);
     buffer.open(QBuffer::ReadWrite);
-    image.save(&buffer, "PNG");
+    im.save(&buffer, "PNG");
     buffer.close();
     stream() << "xlink:href=\"data:image/png;base64,"
              << data.toBase64()
              <<"\" />\n";
+    
+    if (!shapeInfo.isEmpty())
+        stream() << "</g>";
 }
 
 void QSvgPaintEngine::updateState(const QPaintEngineState &state)
@@ -992,13 +1427,26 @@ void QSvgPaintEngine::updateState(const QPaintEngineState &state)
     QPaintEngine::DirtyFlags flags = state.state();
 
     // always stream full gstate, which is not required, but...
-    flags |= QPaintEngine::AllDirty;
+    // [clip path support] quick fix: cannot overwrite DirtyClipPath or DirtyClipRegion
+    // otherwise only clip path will be considered even if clip region is set (which
+    // will output incorrect clip path in this case)
+    flags |= QPaintEngine::DirtyBrush |
+             QPaintEngine::DirtyPen |
+             QPaintEngine::DirtyTransform |
+             QPaintEngine::DirtyFont |
+             QPaintEngine::DirtyOpacity;
 
     // close old state and start a new one...
     if (d->afterFirstUpdate)
-        *d->stream << "</g>\n\n";
+    {
+        stream() << "</g>\n\n";
+        if (trimEmptyGroupEnabled())
+            stashStream().readAll();
+    }
 
-    *d->stream << "<g ";
+    d->discardStashStream = trimEmptyGroupEnabled();
+
+    stream() << "<g ";
 
     if (flags & QPaintEngine::DirtyBrush) {
         qbrushToSvg(state.brush());
@@ -1010,7 +1458,7 @@ void QSvgPaintEngine::updateState(const QPaintEngineState &state)
 
     if (flags & QPaintEngine::DirtyTransform) {
         d->matrix = state.matrix();
-        *d->stream << "transform=\"matrix(" << d->matrix.m11() << ','
+        stream() << "transform=\"matrix(" << d->matrix.m11() << ','
                    << d->matrix.m12() << ','
                    << d->matrix.m21() << ',' << d->matrix.m22() << ','
                    << d->matrix.dx() << ',' << d->matrix.dy()
@@ -1027,7 +1475,30 @@ void QSvgPaintEngine::updateState(const QPaintEngineState &state)
             stream() << "opacity=\""<<state.opacity()<<"\" ";
     }
 
-    *d->stream << '>' << endl;
+    if (clipPathEnabled()) {
+        if (state.isClipEnabled() && state.painter()->hasClipping())
+        {
+            if ((flags & (QPaintEngine::DirtyClipPath | QPaintEngine::DirtyClipRegion))
+                || !qFuzzyCompare(d_func()->matrixClipPath, state.matrix())) {
+                d_func()->clipPath = state.painter()->clipPath();
+                d_func()->matrixClipPath = state.matrix();
+            }
+            /*else if (!qFuzzyCompare(d_func()->matrixClipPath, state.matrix())) {
+                // target clip path = clip path * matrixClipPath = stateMatrix.inverted().map(target clip path) * stateMatrix
+                // so the new clip path in stateMatrix = stateMatrix.inverted().map(clip path * matrixClipPath).
+                const QMatrix& stateMatrix = state.matrix();
+                d_func()->clipPath = stateMatrix.inverted().map(d_func()->matrixClipPath.map(d_func()->clipPath));
+                d_func()->matrixClipPath = stateMatrix;
+            }*/
+        } else {
+            d_func()->clipPath = QPainterPath();
+        }
+        QString id = getClipPathId(state);
+        if (!id.isNull())
+            stream() << QStringLiteral("clip-path=\"url(#%1)\" ").arg(id);
+    }
+
+    stream() << '>' << endl;
 
     d->afterFirstUpdate = true;
 }
@@ -1035,6 +1506,8 @@ void QSvgPaintEngine::updateState(const QPaintEngineState &state)
 void QSvgPaintEngine::drawEllipse(const QRectF &r)
 {
     Q_D(QSvgPaintEngine);
+
+    holdStashStream();
 
     const bool isCircle = r.width() == r.height();
     *d->stream << '<' << (isCircle ? "circle" : "ellipse");
@@ -1052,6 +1525,8 @@ void QSvgPaintEngine::drawEllipse(const QRectF &r)
 void QSvgPaintEngine::drawPath(const QPainterPath &p)
 {
     Q_D(QSvgPaintEngine);
+
+    holdStashStream();
 
     *d->stream << "<path vector-effect=\""
                << (state->pen().isCosmetic() ? "non-scaling-stroke" : "none")
@@ -1100,6 +1575,8 @@ void QSvgPaintEngine::drawPolygon(const QPointF *points, int pointCount,
 
     //Q_D(QSvgPaintEngine);
 
+    holdStashStream();
+
     QPainterPath path(points[0]);
     for (int i=1; i<pointCount; ++i)
         path.lineTo(points[i]);
@@ -1123,14 +1600,30 @@ void QSvgPaintEngine::drawRects(const QRectF *rects, int rectCount)
 {
     Q_D(QSvgPaintEngine);
 
+    holdStashStream();
+
+    bool bTexturePattern = false;
+    if (state->pen().style() == Qt::NoPen &&
+        state->brush().style() == Qt::TexturePattern) {
+        bTexturePattern = true;
+    }
+
     for (int i=0; i < rectCount; ++i) {
         const QRectF &rect = rects[i].normalized();
         *d->stream << "<rect";
         if (state->pen().isCosmetic())
             *d->stream << " vector-effect=\"non-scaling-stroke\"";
         *d->stream << " x=\"" << rect.x() << "\" y=\"" << rect.y()
-                   << "\" width=\"" << rect.width() << "\" height=\"" << rect.height()
-                   << "\"/>" << endl;
+                   << "\" width=\"" << rect.width() << "\" height=\"" << rect.height();
+
+        if (bTexturePattern) {
+            QString patternId = saveTexturePatternBrush(qRound(rect.x()), qRound(rect.y()), state->brush());
+            if (!patternId.isEmpty()) {
+                *d->stream << "\" style=\"fill:url(#" << patternId << ");";
+            }
+        }
+
+        *d->stream << "\"/>" << endl;
     }
 }
 
@@ -1140,17 +1633,58 @@ void QSvgPaintEngine::drawTextItem(const QPointF &pt, const QTextItem &textItem)
     if (d->pen.style() == Qt::NoPen)
         return;
 
+    holdStashStream();
+
     const QTextItemInt &ti = static_cast<const QTextItemInt &>(textItem);
-    if (ti.chars == 0)
+    // Drawing glyphs draw as path and return after drawing the path.
+    if (ti.chars == 0 || (ti.oprFlags & QTextItem::UseDrawGlyphs))
+    {
         QPaintEngine::drawTextItem(pt, ti); // Draw as path
+        return;
+    }
     QString s = QString::fromRawData(ti.chars, ti.num_chars);
 
     *d->stream << "<text "
                   "fill=\"" << d->attributes.stroke << "\" "
                   "fill-opacity=\"" << d->attributes.strokeOpacity << "\" "
                   "stroke=\"none\" "
-                  "xml:space=\"preserve\" "
-                  "x=\"" << pt.x() << "\" y=\"" << pt.y() << "\" ";
+                  "xml:space=\"preserve\" ";
+
+    if (!textCoordEnabled() || ti.glyphs.numGlyphs <= 1)
+    {
+        *d->stream << "x=\"" << pt.x() << "\" y=\"" << pt.y() << "\" ";
+        if (d->font.verticalMetrics() && ti.glyphs.numGlyphs == 1)
+        {
+            QFontMetrics fontMetrics(d->font);
+            appendTransformToSvg(pt.x(), pt.y(), fontMetrics.lineSpacing(), fontMetrics.ascent(), -90);
+        }
+    }
+    else
+    {
+        const QFixedPoint* positions = ti.glyphs.offsets;
+        qreal x = pt.x();
+        qreal y = pt.y();
+        *d->stream << "x=\"";
+        for (int i = 0; i < ti.glyphs.numGlyphs; ++i)
+        {
+            x += (positions + i)->x.toReal();
+            *d->stream << x;
+            if (i < ti.glyphs.numGlyphs - 1)
+                *d->stream << " ";
+            x += ti.glyphs.advances[i].toReal();
+        }
+
+        *d->stream << "\" y=\"";
+        for (int i = 0; i < ti.glyphs.numGlyphs; ++i)
+        {
+            *d->stream << y + (positions + i)->y.toReal();
+            if (i < ti.glyphs.numGlyphs - 1)
+                *d->stream << " ";
+        }
+
+        *d->stream << "\" ";
+    }
+
     qfontToSvg(textItem.font());
     *d->stream << " >"
                << s.toHtmlEscaped()

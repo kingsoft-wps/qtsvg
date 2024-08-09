@@ -1009,6 +1009,9 @@ static qreal parseLength(const String &str, QSvgHandler::LengthType &type,
     } else if (numStr.endsWith(QLatin1String("in"))) {
         numStr.chop(2);
         type = QSvgHandler::LT_IN;
+    } else if (numStr.endsWith(QLatin1String("em"))) {
+        numStr.chop(2);
+        type = QSvgHandler::LT_EM;
     } else {
         type = handler->defaultCoordinateSystem();
         //type = QSvgHandler::LT_OTHER;
@@ -1464,7 +1467,25 @@ static void parseFont(QSvgNode *node,
             break;
         case FontSizeValue: {
             QSvgHandler::LengthType dummy; // should always be pixel size
-            fontStyle->setSize(parseLength(attributes.fontSize, dummy, handler));
+            qreal fontPixelSizeStored = parseLength(attributes.fontSize, dummy, handler);
+
+            if (QSvgHandler::LT_PERCENT == dummy)
+            {
+                qreal docFontSizeBase = 0.0;
+                QSvgNode *nodeParent = node->parent();
+                while (nodeParent)
+                {
+                    if (nodeParent->style().font)
+                    {
+                        docFontSizeBase = nodeParent->style().font->qfont().pointSize();
+                        break;
+                    }
+                    nodeParent = nodeParent->parent();
+                }
+                fontPixelSizeStored = fontPixelSizeStored / 100.0 * docFontSizeBase;
+            }
+
+            fontStyle->setSize(fontPixelSizeStored);
         }
             break;
         default:
@@ -3708,7 +3729,7 @@ static QSvgNode *createTextAreaNode(QSvgNode *parent,
     return node;
 }
 
-static bool parseValuesFromStrList(QVector<qreal> &values, QString &str, QSvgHandler *handler)
+static bool parseValuesFromStrList(QVector<qreal> &values, QString &str, QSvgHandler *handler, QVector<int> &types)
 {
     if (str.isEmpty())
         return false;
@@ -3728,6 +3749,7 @@ static bool parseValuesFromStrList(QVector<qreal> &values, QString &str, QSvgHan
         QString valueStr = (*itr).trimmed();
         QSvgHandler::LengthType lt;
         qreal value = parseLength(valueStr, lt, handler);
+        types.push_back(lt);
         values.push_back(value);
     }
     return true;
@@ -3744,13 +3766,15 @@ static QSvgNode *createTspanNode(QSvgNode *parent, const QXmlStreamAttributes &a
     QString dyStr = attributes.value(QLatin1String("dy")).toString();
 
     QVector<qreal> xList, yList, dxList, dyList;
-    parseValuesFromStrList(xList, xStr, handler);
-    parseValuesFromStrList(yList, yStr, handler);
-    parseValuesFromStrList(dxList, dxStr, handler);
-    parseValuesFromStrList(dyList, dyStr, handler);
+    QVector<int> xTypes, yTypes, dxTypes, dyTypes;
+    parseValuesFromStrList(xList, xStr, handler, xTypes);
+    parseValuesFromStrList(yList, yStr, handler, yTypes);
+    parseValuesFromStrList(dxList, dxStr, handler, dxTypes);
+    parseValuesFromStrList(dyList, dyStr, handler, dyTypes);
 
     QSvgTspan *taspan = new QSvgTspan(parent);
     taspan->setCoordAndOffset(xList, yList, dxList, dyList);
+    taspan->setCoordAndOffsetType(xTypes, yTypes, dxTypes, dyTypes);
     return taspan;
 }
 

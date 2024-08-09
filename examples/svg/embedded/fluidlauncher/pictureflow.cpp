@@ -805,11 +805,11 @@ static inline uint BYTE_MUL_RGB16(uint x, uint a) {
     return t;
 }
 
-static inline uint BYTE_MUL_RGB16_32(uint x, uint a) {
-    uint t = (((x & 0xf81f07e0) >> 5)*a) & 0xf81f07e0;
-    t |= (((x & 0x07e0f81f)*a) >> 5) & 0x07e0f81f;
-    return t;
-}
+// static inline uint BYTE_MUL_RGB16_32(uint x, uint a) {
+//     uint t = (((x & 0xf81f07e0) >> 5)*a) & 0xf81f07e0;
+//     t |= (((x & 0x07e0f81f)*a) >> 5) & 0x07e0f81f;
+//     return t;
+// }
 
 
 // Renders a slide to offscreen buffer. Returns a rect of the rendered area.
