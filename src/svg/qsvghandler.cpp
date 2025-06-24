@@ -496,7 +496,8 @@ static const char * QSvgStyleSelector_nodeString[] = {
     "textarea",
     "tspan",
     "use",
-    "video"
+    "video",
+    "pattern"
 };
 
 class QSvgStyleSelector : public QCss::StyleSelector
